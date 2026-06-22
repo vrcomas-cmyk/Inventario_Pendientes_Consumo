@@ -163,6 +163,20 @@ function paint(container) {
     showLotes(el.dataset.mat, el.dataset.cen || null, el.dataset.alm || null)));
 }
 
+/* ---- API para otras vistas (Sugerencias) ---- */
+export async function ensureInvData() { if (!loaded && !loading) await load(); return loaded; }
+export function precioInv(material, condText) {
+  if (!CONS || !F.material) return null;
+  const m = norm(material), ct = norm(condText).toLowerCase();
+  const rows = CONS.filter(r => norm(r[F.material]) === m);
+  if (!rows.length) return null;
+  const row = rows.find(r => {
+    const c = norm(r[F.cond]).toLowerCase();
+    return c && (ct.includes(c) || c.includes(ct) || (/corta/.test(c) && /corta/.test(ct)));
+  });
+  return row && F.precio ? num(row[F.precio]) : null;
+}
+
 function showLotes(material, centro, almacen) {
   const lotes = (DET || []).filter(r => {
     if (norm(r.Material) !== norm(material)) return false;

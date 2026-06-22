@@ -2,7 +2,7 @@
    ui.js · modal, gráficas y pequeños renderers compartidos
    =========================================================================== */
 import { esc, fmt, money } from './utils.js';
-import { mesLabel } from './resumenFac.js';
+import { mesLabel, completarSerie } from './resumenFac.js';
 
 let chartRef = null;
 
@@ -61,7 +61,7 @@ export function materialesTablaHTML(mats) {
 /* línea mensual importe + cantidad */
 export function drawSerie(canvasId, serie, label) {
   const cv = document.getElementById(canvasId); if (!cv) return;
-  const data = serie || [];
+  const data = completarSerie(serie || []);
   if (chartRef) { try { chartRef.destroy(); } catch (e) {} }
   if (!data.length) { cv.parentElement.innerHTML = '<p class="muted">Sin facturación para graficar.</p>'; return; }
   chartRef = new Chart(cv, {

@@ -163,6 +163,23 @@ export function clasificarEstado(serie, pedido = false) {
 
 /* nombres de mes para mostrar mmmm/aaaa */
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+/* rellena los meses sin compra con 0 desde el primer mes hasta el mes corriente
+   (para que la gráfica llegue completa hasta hoy) */
+export function completarSerie(serie) {
+  if (!serie || !serie.length) return serie || [];
+  const byMes = new Map(serie.map(s => [s.mes, s]));
+  let [mm, yy] = String(serie[0].mes).split('/').map(Number);
+  const endK = Math.max(mesKey(serie[serie.length - 1].mes), mesKey(store.CURMES));
+  const out = []; let guard = 0;
+  while (guard++ < 600) {
+    const mes = String(mm).padStart(2, '0') + '/' + yy;
+    out.push(byMes.get(mes) || { mes, cant: 0, imp: 0 });
+    if (yy * 12 + mm >= endK) break;
+    mm++; if (mm > 12) { mm = 1; yy++; }
+  }
+  return out;
+}
 export function mesLabel(m) {
   const p = String(m == null ? '' : m).split('/'); if (p.length !== 2) return String(m || '');
   return (MESES[(+p[0]) - 1] || p[0]) + '/' + p[1];

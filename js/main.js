@@ -2,10 +2,11 @@
    main.js · arranque y router de pestañas
    =========================================================================== */
 import { initUpload, openUploader } from './data.js';
-import { renderInventario } from './inventario.js';
+import { renderInventario, ensureInvData } from './inventario.js';
 import { renderSug } from './sugerencias.js';
 import { renderConsumo } from './consumo.js';
 import { closeModal } from './ui.js';
+import { loadEnrich } from './enrich.js';
 
 const TABS = [
   { id: 'inv',  label: '🏷️ Inventario (condición)' },   // 1° vista — tu HTML tal cual (AppScript)
@@ -40,6 +41,9 @@ function boot() {
   // cerrar modal con fondo
   document.querySelector('#ov').addEventListener('click', e => { if (e.target.id === 'ov') closeModal(); });
   render();
+  // datos maestros (Ejecutivos/Materiales) e inventario para precios en fuentes
+  ensureInvData();
+  loadEnrich(false).then(() => render());
 }
 
 boot();

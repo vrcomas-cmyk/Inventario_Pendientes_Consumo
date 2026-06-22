@@ -1,16 +1,24 @@
 /* ===========================================================================
-   sugerencias.js · "Todas las Sugerencias" (BO) — v3
-   Estado (recencia) y Tendencia (dirección con mes actual) separados.
-   Buscador con refresco ligero (no reconstruye el input -> admite espacios).
+   sugerencias.js · "Todas las Sugerencias" (BO) — v4
    =========================================================================== */
 import { norm, num, fmt, money, esc } from './utils.js';
 import { store, C } from './store.js';
 import { serieMatDest, serieSolic, serieDest, consumoDe, clasificarEstado,
-         tendenciaTexto, comparativa, materialesDe, ESTADOS } from './resumenFac.js';
+         tendenciaTexto, comparativa, materialesDe } from './resumenFac.js';
+import { ESTADOS } from './resumenFac.js';
 import { openModal, drawSerie, pill, trendText, invGrid, rankingHTML,
          comparativaHTML, materialesTablaHTML } from './ui.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
+import { grupoCliente, ejecutivoNombre, matSector, matGrupo, loadEnrich, enrichTs, normCode } from './enrich.js';
+import { precioInv } from './inventario.js';
+
+/* ---- getters enriquecidos ---- */
+const grupoCli = b => grupoCliente(b[C.gpo]) || norm(b[C.gpo]);
+const ejecDe   = b => ejecutivoNombre(b[C.gpoV]);
+const sectorDe = b => matSector(b[C.matBase]);
+const grupoArt = b => matGrupo(b[C.matBase]);
+const bloqDe   = b => norm(b[C.bloq]);
 
 const hasFuente = r => norm(r[C.fuente]) !== '';
 const invCell = (inv, tr) => { const t = num(tr); return `<td class="num">${fmt(inv)}${t > 0 ? `<div class="tr">↻ ${fmt(t)}</div>` : ''}</td>`; };
@@ -35,15 +43,19 @@ export function buildBO(rows) {
 const flt = makeFilters();
 flt.estado = ''; flt.fuente = '';
 const cols = () => [
-  { key: 'gpo', label: 'Grupo cliente', get: it => it.bo[C.gpo] },
-  { key: 'oc', label: 'OC', get: it => it.bo[C.oc] },
+  { key: 'grupocli', label: 'Grupo cliente', get: it => grupoCli(it.bo) },
   { key: 'pedido', label: 'Pedido', get: it => it.bo[C.pedido] },
+  { key: 'oc', label: 'OC', get: it => it.bo[C.oc] },
   { key: 'cliente', label: 'Cliente', get: it => it.bo[C.razon] },
+  { key: 'ejecutivo', label: 'Ejecutivo', get: it => ejecDe(it.bo) },
   { key: 'solic', label: 'Solicitante', get: it => it.bo[C.solic] },
   { key: 'dest', label: 'Destinatario', get: it => it.bo[C.dest] },
   { key: 'mat', label: 'Material', get: it => it.bo[C.matBase] },
   { key: 'desc', label: 'Descripción', get: it => it.bo[C.descSol] },
+  { key: 'sector', label: 'Sector', get: it => sectorDe(it.bo) },
+  { key: 'grupoart', label: 'Grupo art.', get: it => grupoArt(it.bo) },
   { key: 'centro', label: 'Centro', get: it => it.bo[C.centro] },
+  { key: 'bloq', label: 'Bloqueado', get: it => bloqDe(it.bo) },
 ];
 function filtered() {
   const Cc = cols();
@@ -64,17 +76,23 @@ export function renderSug(container) {
   }
   const estSel = `<select data-est><option value="">Estado (todos)</option>${ESTADOS.map(([k, l]) => `<option value="${k}" ${flt.estado === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   const fueSel = `<select data-fue><option value="">Fuentes</option><option value="si" ${flt.fuente === 'si' ? 'selected' : ''}>Con fuentes</option><option value="no" ${flt.fuente === 'no' ? 'selected' : ''}>Sin fuentes</option></select>`;
-  container.innerHTML = `${toolbarHTML(cols(), flt, `${estSel}${fueSel}${zoomHTML('sug')}`)}<div class="result"></div>`;
+  const ts = enrichTs();
+  const updBtn = `<button class="btn" data-upd title="${ts ? 'Última actualización: ' + new Date(ts).toLocaleString('es-MX') : 'Sin descargar aún'}">🔄 Actualizar Ejecutivos/Materiales</button>`;
+  container.innerHTML = `${toolbarHTML(cols(), flt, `${estSel}${fueSel}${zoomHTML('sug')}${updBtn}`)}<div class="result"></div>`;
   wireToolbar(container, flt, () => renderSug(container), () => paint(container));
   container.querySelector('[data-est]').onchange = e => { flt.estado = e.target.value; paint(container); };
   container.querySelector('[data-fue]').onchange = e => { flt.fuente = e.target.value; paint(container); };
+  container.querySelector('[data-upd]').onclick = ev => { ev.target.textContent = '⏳ Actualizando…'; loadEnrich(true).then(() => renderSug(container)); };
   paint(container);
 }
 
 function paint(container) {
   const list = filtered();
-  const pend = list.reduce((s, it) => s + num(it.bo[C.pend]), 0);
-  const impPend = list.reduce((s, it) => s + num(it.bo[C.pend]) * num(it.bo[C.precio]), 0);
+  const isBloq = it => bloqDe(it.bo) !== '';
+  const pendTot = list.reduce((s, it) => s + num(it.bo[C.pend]), 0);
+  const pendBloq = list.filter(isBloq).reduce((s, it) => s + num(it.bo[C.pend]), 0);
+  const impTot = list.reduce((s, it) => s + num(it.bo[C.pend]) * num(it.bo[C.precio]), 0);
+  const impBloq = list.filter(isBloq).reduce((s, it) => s + num(it.bo[C.pend]) * num(it.bo[C.precio]), 0);
   const conF = list.filter(it => it.fuentes.length).length;
 
   const rkMap = new Map();
@@ -86,20 +104,26 @@ function paint(container) {
   const rk = [...rkMap.values()].filter(x => x.val > 0).sort((a, b) => b.val - a.val).slice(0, 10);
 
   const rows = list.map((it, i) => {
-    const b = it.bo, cen = `${esc(b[C.centro])}${norm(b[C.alm]) ? ' / ' + esc(b[C.alm]) : ''}`;
-    return `<tr class="click" data-i="${i}">
-      <td>${esc(b[C.gpo])}</td><td>${esc(b[C.oc])}</td><td>${esc(b[C.pedido])}</td><td>${esc(b[C.fecha])}</td>
+    const b = it.bo, bl = bloqDe(b), cen = `${esc(b[C.centro])}${norm(b[C.alm]) ? ' / ' + esc(b[C.alm]) : ''}`;
+    return `<tr class="click ${bl ? 'bloq' : ''}" data-i="${i}">
+      <td><div>${esc(grupoCli(b))}</div><div class="sub">${esc(normCode(b[C.gpo]))}</div></td>
+      <td><span class="lnk" data-ev="ped" data-k="${esc(b[C.pedido])}"><b>${esc(b[C.pedido])}</b></span><div class="sub">OC ${esc(b[C.oc]) || '—'}</div></td>
+      <td>${esc(b[C.fecha])}</td>
       <td><div>${esc(b[C.razon])}</div>
         <div style="font-size:11px;margin-top:2px">
           <span class="lnk" data-ev="solic" data-k="${esc(b[C.solic])}">Solic ${esc(b[C.solic])}</span> ·
           <span class="lnk" data-ev="dest"  data-k="${esc(b[C.dest])}">Dest ${esc(b[C.dest])}</span></div></td>
+      <td>${esc(ejecDe(b)) || '—'}</td>
       <td>${cen}</td>
       <td><span class="lnk" data-ev="det" data-i="${i}">${esc(b[C.matBase])}</span></td>
       <td>${esc(b[C.descSol])}</td>
+      <td>${esc(sectorDe(b)) || '—'}</td>
+      <td>${esc(grupoArt(b)) || '—'}</td>
       <td class="num">${fmt(b[C.cantPed])}</td><td class="num">${fmt(b[C.pend])}</td>
       <td class="num">${money(b[C.precio])}</td><td class="num">${fmt(b[C.consumo])}</td>
       ${invCell(b[C.inv1030], b[C.tr1030])}${invCell(b[C.inv1031], b[C.tr1031])}
       ${invCell(b[C.inv1032], b[C.tr1032])}${invCell(b[C.inv1060], 0)}
+      <td>${bl ? `<span class="pill amb">${esc(bl)}</span>` : '—'}</td>
       <td>${pill(it.status.label, it.status.cls)}</td>
       <td>${trendText(it.tend)}</td>
       <td class="num"><span class="lnk" data-ev="det" data-i="${i}">${it.fuentes.length || '—'}</span></td>
@@ -110,23 +134,25 @@ function paint(container) {
     <div class="invtop">
       <div class="kpis2x2">
         <div class="kpi sm"><div class="lbl">Renglones BO</div><div class="val">${fmt(list.length)}</div></div>
-        <div class="kpi sm"><div class="lbl">Cant. pendiente</div><div class="val">${fmt(pend)}</div></div>
-        <div class="kpi sm"><div class="lbl">Importe pendiente</div><div class="val" style="font-size:18px">${money(impPend)}</div></div>
+        <div class="kpi sm"><div class="lbl">Cant. pendiente</div><div class="val">${fmt(pendTot)}</div>
+          <div class="sub"><span class="gok">🟢 ${fmt(pendTot - pendBloq)}</span> · <span class="gwarn">🟡 ${fmt(pendBloq)}</span></div></div>
+        <div class="kpi sm"><div class="lbl">Importe pendiente</div><div class="val" style="font-size:17px">${money(impTot)}</div>
+          <div class="sub"><span class="gok">🟢 ${money(impTot - impBloq)}</span> · <span class="gwarn">🟡 ${money(impBloq)}</span></div></div>
         <div class="kpi sm"><div class="lbl">Con fuentes</div><div class="val">${fmt(conF)}</div></div>
       </div>
       ${rankingHTML(rk, { title: '🏆 Top 10 material por importe pendiente', money: true })}
     </div>
     <div class="tablecard">
-      <h3>📋 Todas las Sugerencias <span class="hint">fila = detalle · material/fuentes = inventario y evolución · Solic/Dest = facturación general</span></h3>
+      <h3>📋 Todas las Sugerencias <span class="hint">fila = detalle · Pedido = detalle del pedido · material/fuentes = inventario · Solic/Dest = facturación</span></h3>
       <div class="tbl"><table>
         <thead><tr>
-          <th>Grupo de cliente</th><th>OC</th><th>Pedido</th><th>Fecha</th><th>Cliente</th><th>Centro/Alm</th>
-          <th>Material base</th><th>Descripción material</th><th class="num">Cant. ped.</th><th class="num">Pendiente</th>
-          <th class="num">Precio</th><th class="num">Consumo</th>
+          <th>Grupo de cliente</th><th>Pedido / OC</th><th>Fecha</th><th>Cliente</th><th>Ejecutivo</th><th>Centro/Alm</th>
+          <th>Material base</th><th>Descripción material</th><th>Sector</th><th>Grupo art.</th>
+          <th class="num">Cant. ped.</th><th class="num">Pendiente</th><th class="num">Precio</th><th class="num">Consumo</th>
           <th class="num">Inv 1030</th><th class="num">Inv 1031</th><th class="num">Inv 1032</th><th class="num">Inv 1060</th>
-          <th>Estado</th><th>Tendencia</th><th class="num">Fuentes</th>
+          <th>Bloqueado</th><th>Estado</th><th>Tendencia</th><th class="num">Fuentes</th>
         </tr></thead>
-        <tbody>${rows || '<tr><td colspan="19" class="muted" style="padding:20px;text-align:center">Sin resultados</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="22" class="muted" style="padding:20px;text-align:center">Sin resultados</td></tr>'}</tbody>
       </table></div>
     </div>`;
 
@@ -135,11 +161,16 @@ function paint(container) {
     ev.stopPropagation();
     const kind = el.dataset.ev, l2 = filtered();
     if (kind === 'det') openDetalle(l2[+el.dataset.i]);
+    else if (kind === 'ped') openPedido(el.dataset.k);
     else if (kind === 'solic') openEvol('solic', el.dataset.k);
     else if (kind === 'dest') openEvol('dest', el.dataset.k);
   }));
   container.querySelectorAll('.result tr.click').forEach(tr => tr.addEventListener('click', () => openDetalle(filtered()[+tr.dataset.i])));
 }
+
+/* encabezado: solicitante › razón social › destinatario */
+const cabecera = b => `<h2>${esc(b[C.solic])} › ${esc(b[C.razon])} › ${esc(b[C.dest])}</h2>
+  <p class="muted">Solicitante › Razón social › Destinatario</p>`;
 
 function consumoHTML(cons, status) {
   const st = status || (cons && cons.tnd);
@@ -157,7 +188,38 @@ function consumoHTML(cons, status) {
     <div class="b"><div class="t">Estado</div><div class="m">${pill(st.label, st.cls)}</div></div></div>`;
 }
 
-export function openDetalle(it) {
+/* detalle del PEDIDO: todos los materiales, navegables */
+export function openPedido(pedido) {
+  const items = store.BO.filter(it => norm(it.bo[C.pedido]) === norm(pedido));
+  if (!items.length) return;
+  const b0 = items[0].bo;
+  const pendTot = items.reduce((s, it) => s + num(it.bo[C.pend]), 0);
+  const impTot = items.reduce((s, it) => s + num(it.bo[C.pend]) * num(it.bo[C.precio]), 0);
+  const rows = items.map((it, i) => {
+    const b = it.bo, bl = bloqDe(b);
+    return `<tr class="click ${bl ? 'bloq' : ''}" data-pi="${i}">
+      <td><span class="lnk">${esc(b[C.matBase])}</span></td><td>${esc(b[C.descSol])}</td>
+      <td class="num">${fmt(b[C.cantPed])}</td><td class="num">${fmt(b[C.pend])}</td><td class="num">${money(b[C.precio])}</td>
+      <td class="num">${it.fuentes.length || '—'}</td>
+      <td>${bl ? `<span class="pill amb">${esc(bl)}</span>` : '—'}</td>
+      <td>${pill(it.status.label, it.status.cls)}</td><td>${trendText(it.tend)}</td></tr>`;
+  }).join('');
+  openModal(`
+    <button class="x" onclick="closeModal()">×</button>
+    <h2>Pedido ${esc(pedido)}</h2>
+    <p class="muted">${esc(b0[C.razon])} · OC ${esc(b0[C.oc]) || '—'} · ${items.length} material(es)</p>
+    <div class="mkpis">
+      <div class="stat"><div class="l">Materiales</div><div class="v">${items.length}</div></div>
+      <div class="stat"><div class="l">Cant. pendiente</div><div class="v">${fmt(pendTot)}</div></div>
+      <div class="stat"><div class="l">Importe pendiente</div><div class="v" style="font-size:16px">${money(impTot)}</div></div>
+    </div>
+    <div class="tablecard"><h3>Materiales del pedido <span class="hint">clic en una fila para ver el detalle del material</span></h3>
+      <div class="tbl"><table><thead><tr><th>Material</th><th>Descripción</th><th class="num">Cant. ped.</th><th class="num">Pendiente</th><th class="num">Precio</th><th class="num">Fuentes</th><th>Bloqueado</th><th>Estado</th><th>Tendencia</th></tr></thead>
+      <tbody>${rows}</tbody></table></div></div>`);
+  document.querySelectorAll('#modal tr.click').forEach(tr => tr.addEventListener('click', () => openDetalle(items[+tr.dataset.pi], pedido)));
+}
+
+export function openDetalle(it, fromPedido) {
   if (!it) return;
   const b = it.bo;
   const invPrincipales = [['1030', b[C.inv1030]], ['1031', b[C.inv1031]], ['1032', b[C.inv1032]], ['1060', b[C.inv1060]]];
@@ -166,21 +228,26 @@ export function openDetalle(it) {
   const transito = [['Tránsito 1030', b[C.tr1030]], ['Tránsito 1031', b[C.tr1031]], ['Tránsito 1032', b[C.tr1032]], ['Tránsito total', b[C.transito]]].filter(([, v]) => num(v) > 0);
 
   const fz = it.fuentes.length
-    ? `<div class="tbl"><table><thead><tr><th>Fuente</th><th>Material sug.</th><th>Descripción</th><th>Centro/Alm</th><th class="num">Disponible</th><th>Lote</th><th>Caducidad</th></tr></thead><tbody>${
-        it.fuentes.map(f => `<tr><td>${pill(norm(f[C.fuente]), /[Cc]orta/.test(norm(f[C.fuente])) ? 'rojo' : 'azul')}</td><td>${esc(f[C.matSug])}</td><td>${esc(f[C.descSug])}</td><td>${esc(f[C.cenSug])}${norm(f[C.almSug]) ? ' / ' + esc(f[C.almSug]) : ''}</td><td class="num">${fmt(f[C.disp])}</td><td>${esc(f[C.lote])}</td><td>${esc(f[C.cad])}</td></tr>`).join('')
+    ? `<div class="tbl"><table><thead><tr><th>Fuente</th><th>Material sug.</th><th>Descripción</th><th>Centro/Alm</th><th class="num">Disponible</th><th class="num">Precio inv.</th><th>Lote</th><th>Caducidad</th></tr></thead><tbody>${
+        it.fuentes.map(f => {
+          const pInv = precioInv(f[C.matSug], f[C.fuente]);
+          return `<tr><td>${pill(norm(f[C.fuente]), /[Cc]orta/.test(norm(f[C.fuente])) ? 'rojo' : 'azul')}</td><td>${esc(f[C.matSug])}</td><td>${esc(f[C.descSug])}</td><td>${esc(f[C.cenSug])}${norm(f[C.almSug]) ? ' / ' + esc(f[C.almSug]) : ''}</td><td class="num">${fmt(f[C.disp])}</td><td class="num">${pInv != null ? money(pInv) : '—'}</td><td>${esc(f[C.lote])}</td><td>${esc(f[C.cad])}</td></tr>`;
+        }).join('')
       }</tbody></table></div>`
     : '<p class="muted">Este BO no tiene fuentes asociadas.</p>';
 
+  const bl = bloqDe(b);
   openModal(`
     <button class="x" onclick="closeModal()">×</button>
-    <h2>${esc(b[C.razon])}</h2>
-    <p class="muted">Pedido ${esc(b[C.pedido])} · OC ${esc(b[C.oc])} · Material ${esc(b[C.matBase])} — ${esc(b[C.descSol])}</p>
+    ${fromPedido ? `<button class="btn" style="float:left;margin-right:10px" onclick="window.__volverPedido()">← Pedido ${esc(fromPedido)}</button>` : ''}
+    ${cabecera(b)}
+    <p class="muted">Pedido ${esc(b[C.pedido])} · OC ${esc(b[C.oc]) || '—'} · Material ${esc(b[C.matBase])} — ${esc(b[C.descSol])} ${bl ? '· <span class="pill amb">' + esc(bl) + '</span>' : ''}</p>
     <div class="mkpis">
       <div class="stat"><div class="l">Pendiente</div><div class="v">${fmt(b[C.pend])}</div></div>
       <div class="stat"><div class="l">Precio</div><div class="v">${money(b[C.precio])}</div></div>
       <div class="stat"><div class="l">Estado</div><div class="v" style="font-size:14px">${pill(it.status.label, it.status.cls)}</div></div>
       <div class="stat"><div class="l">Tendencia</div><div class="v" style="font-size:14px">${trendText(it.tend)}</div></div>
-      <div class="stat"><div class="l">Solic / Dest</div><div class="v" style="font-size:14px">${esc(b[C.solic])} / ${esc(b[C.dest])}</div></div>
+      <div class="stat"><div class="l">Ejecutivo</div><div class="v" style="font-size:13px">${esc(ejecDe(b)) || '—'}</div></div>
     </div>
     <div class="card"><h3>💵 Consumo / facturación</h3>${consumoHTML(it.cons, it.status)}</div>
     ${store.RF ? `<div class="card"><h3>📊 Comparativo anual</h3>${comparativaHTML(comparativa(it.serie))}</div>` : ''}
@@ -191,10 +258,10 @@ export function openDetalle(it) {
       <h3 style="margin-top:12px">🔁 Disponible entre almacenes</h3>${invGrid(dispo)}
       <h3 style="margin-top:12px">🚚 Material en curso (tránsito) por almacén</h3>${transito.length ? invGrid(transito) : '<p class="muted">Sin material en tránsito.</p>'}</div>
   `);
+  if (fromPedido) window.__volverPedido = () => openPedido(fromPedido);
   drawSerie('cD', it.serie, '');
 }
 
-/* clic Solic/Dest: general + comparativa + todos los códigos facturados con su tendencia */
 export function openEvol(kind, key) {
   if (!store.RF) { alert('No hay Resumen_Fac cargado.'); return; }
   const serie = kind === 'solic' ? serieSolic(key) : serieDest(key);

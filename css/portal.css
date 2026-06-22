@@ -126,3 +126,12 @@ tr.hidden-admin:hover{opacity:1}
 /* pill nueva compra / reactivación */
 .pill.vio{background:#241a3a;color:#c9a7ff;border:1px solid #a371f755}
 .kpi .val.vio,.tnd.vio{color:#a371f7}
+
+/* ===== bloqueado / subtítulos / KPI desglose ===== */
+tr.bloq{background:#332b0c}
+tr.bloq:hover{background:#3d3310}
+.sub{font-size:10px;color:var(--mut);margin-top:1px}
+.gok{color:var(--ok);font-weight:700}
+.gwarn{color:var(--warn);font-weight:700}
+.tnd.amb{color:var(--warn)}
+.kpi.sm .sub{font-size:11px}

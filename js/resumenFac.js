@@ -48,6 +48,26 @@ export function buildRF(rows) {
   };
 }
 
+/* rankings globales (desde Resumen_Fac) */
+export function rankingMaterialesAvg12() {
+  if (!store.RF) return [];
+  const cur = mesKey(store.CURMES), lo = cur - 11;
+  const acc = new Map();
+  store.RF.matDest.forEach((serie, key) => {
+    const mat = key.split('||')[1];
+    let sum = 0; serie.forEach(s => { const k = mesKey(s.mes); if (k >= lo && k <= cur) sum += s.imp; });
+    if (sum) acc.set(mat, (acc.get(mat) || 0) + sum);
+  });
+  return [...acc.entries()].map(([mat, sum]) => ({ code: mat, desc: (store.RF.matTexto.get(mat) || '').slice(0, 40), val: sum / 12 }))
+    .sort((a, b) => b.val - a.val).slice(0, 10);
+}
+export function rankingSolicitantes() {
+  if (!store.RF) return [];
+  const acc = [];
+  store.RF.solic.forEach((serie, s) => { const sum = serie.reduce((a, x) => a + x.imp, 0); if (sum) acc.push({ code: s, desc: '', val: sum }); });
+  return acc.sort((a, b) => b.val - a.val).slice(0, 10);
+}
+
 /* materiales facturados a un solicitante / destinatario, con su tendencia */
 export function materialesDe(kind, key) {
   if (!store.RF) return [];

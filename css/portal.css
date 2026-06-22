@@ -135,3 +135,12 @@ tr.bloq:hover{background:#3d3310}
 .gwarn{color:var(--warn);font-weight:700}
 .tnd.amb{color:var(--warn)}
 .kpi.sm .sub{font-size:11px}
+
+/* ===== orden de columnas + paginación ===== */
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--tx)}
+.sorti{color:var(--acc);font-weight:800;font-size:11px}
+.pager{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-top:1px solid var(--bd)}
+.pager .btn{padding:6px 10px;font-size:12px}
+.pager .btn:disabled{opacity:.4;cursor:default}
+.pager select{padding:6px 8px;border:1px solid var(--bd);background:var(--panel2);color:var(--tx);border-radius:8px}

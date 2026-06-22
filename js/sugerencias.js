@@ -8,8 +8,9 @@ import { serieMatDest, serieSolic, serieDest, consumoDe, clasificarEstado,
 import { ESTADOS } from './resumenFac.js';
 import { openModal, drawSerie, pill, trendText, invGrid, rankingHTML,
          comparativaHTML, materialesTablaHTML } from './ui.js';
-import { toolbarHTML, wireToolbar, makeFilters, passes } from './filters.js';
+import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
+import { makeSort, cycleSort, applySort, th } from './sort.js';
 import { grupoCliente, ejecutivoNombre, matSector, matGrupo, loadEnrich, enrichTs, normCode } from './enrich.js';
 import { precioInv } from './inventario.js';
 
@@ -42,6 +43,18 @@ export function buildBO(rows) {
 
 const flt = makeFilters();
 flt.estado = ''; flt.fuente = '';
+let sort = makeSort();
+const ESTRANK = { nueva: 7, corriente: 6, reactiva: 5, revisar: 4, riesgo: 3, sinanio: 2, nada: 1 };
+const SORTV = {
+  grupocli: it => grupoCli(it.bo), pedido: it => it.bo[C.pedido], oc: it => it.bo[C.oc], fecha: it => it.bo[C.fecha],
+  cliente: it => it.bo[C.razon], ejecutivo: it => ejecDe(it.bo), centro: it => it.bo[C.centro],
+  mat: it => it.bo[C.matBase], desc: it => it.bo[C.descSol], sector: it => sectorDe(it.bo), grupoart: it => grupoArt(it.bo),
+  cantped: it => num(it.bo[C.cantPed]), pend: it => num(it.bo[C.pend]), precio: it => num(it.bo[C.precio]), consumo: it => num(it.bo[C.consumo]),
+  inv1030: it => num(it.bo[C.inv1030]), inv1031: it => num(it.bo[C.inv1031]), inv1032: it => num(it.bo[C.inv1032]), inv1060: it => num(it.bo[C.inv1060]),
+  bloq: it => bloqDe(it.bo), estado: it => ESTRANK[it.status.key] ?? 0, tend: it => ({ up: 2, flat: 1, down: 0 }[it.tend.dir] ?? 1),
+  fuentes: it => it.fuentes.length,
+};
+const accessor = (it, k) => SORTV[k] ? SORTV[k](it) : '';
 const cols = () => [
   { key: 'grupocli', label: 'Grupo cliente', get: it => grupoCli(it.bo) },
   { key: 'pedido', label: 'Pedido', get: it => it.bo[C.pedido] },
@@ -79,7 +92,7 @@ export function renderSug(container) {
   const ts = enrichTs();
   const updBtn = `<button class="btn" data-upd title="${ts ? 'Última actualización: ' + new Date(ts).toLocaleString('es-MX') : 'Sin descargar aún'}">🔄 Actualizar Ejecutivos/Materiales</button>`;
   container.innerHTML = `${toolbarHTML(cols(), flt, `${estSel}${fueSel}${zoomHTML('sug')}${updBtn}`)}<div class="result"></div>`;
-  wireToolbar(container, flt, () => renderSug(container), () => paint(container));
+  wireToolbar(container, flt, () => renderSug(container), () => paint(container), makeSuggest(store.BO, cols()));
   container.querySelector('[data-est]').onchange = e => { flt.estado = e.target.value; paint(container); };
   container.querySelector('[data-fue]').onchange = e => { flt.fuente = e.target.value; paint(container); };
   container.querySelector('[data-upd]').onclick = ev => { ev.target.textContent = '⏳ Actualizando…'; loadEnrich(true).then(() => renderSug(container)); };
@@ -87,7 +100,7 @@ export function renderSug(container) {
 }
 
 function paint(container) {
-  const list = filtered();
+  const list = applySort(filtered(), sort, accessor);
   const isBloq = it => bloqDe(it.bo) !== '';
   const pendTot = list.reduce((s, it) => s + num(it.bo[C.pend]), 0);
   const pendBloq = list.filter(isBloq).reduce((s, it) => s + num(it.bo[C.pend]), 0);
@@ -146,17 +159,21 @@ function paint(container) {
       <h3>📋 Todas las Sugerencias <span class="hint">fila = detalle · Pedido = detalle del pedido · material/fuentes = inventario · Solic/Dest = facturación</span></h3>
       <div class="tbl"><table>
         <thead><tr>
-          <th>Grupo de cliente</th><th>Pedido / OC</th><th>Fecha</th><th>Cliente</th><th>Ejecutivo</th><th>Centro/Alm</th>
-          <th>Material base</th><th>Descripción material</th><th>Sector</th><th>Grupo art.</th>
-          <th class="num">Cant. ped.</th><th class="num">Pendiente</th><th class="num">Precio</th><th class="num">Consumo</th>
-          <th class="num">Inv 1030</th><th class="num">Inv 1031</th><th class="num">Inv 1032</th><th class="num">Inv 1060</th>
-          <th>Bloqueado</th><th>Estado</th><th>Tendencia</th><th class="num">Fuentes</th>
+          ${th('Grupo de cliente', 'grupocli', sort)}${th('Pedido / OC', 'pedido', sort)}${th('Fecha', 'fecha', sort)}
+          ${th('Cliente', 'cliente', sort)}${th('Ejecutivo', 'ejecutivo', sort)}${th('Centro/Alm', 'centro', sort)}
+          ${th('Material base', 'mat', sort)}${th('Descripción material', 'desc', sort)}${th('Sector', 'sector', sort)}${th('Grupo art.', 'grupoart', sort)}
+          ${th('Cant. ped.', 'cantped', sort, 'num')}${th('Pendiente', 'pend', sort, 'num')}${th('Precio', 'precio', sort, 'num')}${th('Consumo', 'consumo', sort, 'num')}
+          ${th('Inv 1030', 'inv1030', sort, 'num')}${th('Inv 1031', 'inv1031', sort, 'num')}${th('Inv 1032', 'inv1032', sort, 'num')}${th('Inv 1060', 'inv1060', sort, 'num')}
+          ${th('Bloqueado', 'bloq', sort)}${th('Estado', 'estado', sort)}${th('Tendencia', 'tend', sort)}${th('Fuentes', 'fuentes', sort, 'num')}
         </tr></thead>
         <tbody>${rows || '<tr><td colspan="22" class="muted" style="padding:20px;text-align:center">Sin resultados</td></tr>'}</tbody>
       </table></div>
     </div>`;
 
   wireZoom(container, 'sug', '.result .tbl table');
+  container.querySelectorAll('.result th.sortable').forEach(thEl => thEl.addEventListener('click', e => {
+    sort = cycleSort(sort, thEl.dataset.sort, e.shiftKey); paint(container);
+  }));
   container.querySelectorAll('.result [data-ev]').forEach(el => el.addEventListener('click', ev => {
     ev.stopPropagation();
     const kind = el.dataset.ev, l2 = filtered();

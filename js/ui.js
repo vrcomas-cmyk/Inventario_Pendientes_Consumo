@@ -5,6 +5,7 @@ import { esc, fmt, money } from './utils.js';
 import { mesLabel, completarSerie } from './resumenFac.js';
 
 let chartRef = null;
+const charts = {};
 
 export function openModal(html) {
   document.querySelector('#modal').innerHTML = html;
@@ -12,8 +13,9 @@ export function openModal(html) {
 }
 export function closeModal() {
   document.querySelector('#ov').classList.remove('show');
-  if (chartRef) { try { chartRef.destroy(); } catch (e) {} chartRef = null; }
+  ['cD', 'cG', 'cC'].forEach(destroyChart);     // gráficas de modal
 }
+export function destroyChart(id) { if (charts[id]) { try { charts[id].destroy(); } catch (e) {} delete charts[id]; } }
 window.closeModal = closeModal; // para el botón × inline
 
 /* pill de estado/tendencia */
@@ -62,9 +64,9 @@ export function materialesTablaHTML(mats) {
 export function drawSerie(canvasId, serie, label) {
   const cv = document.getElementById(canvasId); if (!cv) return;
   const data = completarSerie(serie || []);
-  if (chartRef) { try { chartRef.destroy(); } catch (e) {} }
+  destroyChart(canvasId);
   if (!data.length) { cv.parentElement.innerHTML = '<p class="muted">Sin facturación para graficar.</p>'; return; }
-  chartRef = new Chart(cv, {
+  charts[canvasId] = new Chart(cv, {
     type: 'line',
     data: { labels: data.map(d => mesLabel(d.mes)), datasets: [
       { label: 'Importe',  data: data.map(d => d.imp),  borderColor: '#4da3ff', backgroundColor: '#4da3ff22', fill: true, tension: .25, yAxisID: 'y'  },

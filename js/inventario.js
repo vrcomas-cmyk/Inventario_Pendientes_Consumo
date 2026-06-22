@@ -5,13 +5,22 @@
    =========================================================================== */
 import { norm, num, fmt, money, esc } from './utils.js';
 import { openModal, pill, rankingHTML } from './ui.js';
-import { toolbarHTML, wireToolbar, makeFilters, passes } from './filters.js';
+import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
+import { makeSort, cycleSort, applySort, th } from './sort.js';
 import { INV_CFG } from './invConfig.js';
 
 let CONS = null, DET = null, INVCODES = [], F = {}, loaded = false, loading = false, loadErr = '';
 const flt = makeFilters();
 flt.cond = ''; flt.grupo = ''; flt.sector = '';
+let sort = makeSort();
+const accessor = (r, k) => {
+  if (k === 'mat') return r[F.material]; if (k === 'cond') return r[F.cond]; if (k === 'grupo') return r[F.grupo];
+  if (k === 'precio') return num(r[F.precio]); if (k === 'disp1030') return num(r[F.disp1030]); if (k === 'disp1032') return num(r[F.disp1032]);
+  if (k === 'invSuma') return num(r[F.invSuma]); if (k === 'importe') return num(r[F.importe]);
+  if (k.startsWith('inv')) return num(r['Inv ' + k.slice(3)]);
+  return '';
+};
 
 const admin = {
   on: () => localStorage.getItem('inv_admin') === '1',
@@ -98,7 +107,7 @@ export function renderInventario(container) {
   const adminBtn = `<button class="btn ${isAdmin ? 'primary' : ''}" data-admin>${isAdmin ? '🔓 Admin ON' : '🔒 Admin'}</button>`;
 
   container.innerHTML = `${toolbarHTML(cols(), flt, `${cats}${zoomHTML('inv')}${adminBtn}`)}<div class="result"></div>`;
-  wireToolbar(container, flt, () => renderInventario(container), () => paint(container));
+  wireToolbar(container, flt, () => renderInventario(container), () => paint(container), makeSuggest(CONS || [], cols()));
   container.querySelectorAll('[data-cat]').forEach(s => s.onchange = e => { flt[e.target.dataset.cat] = e.target.value; paint(container); });
   container.querySelector('[data-admin]').onclick = () => { admin.setOn(!isAdmin); renderInventario(container); };
   paint(container);
@@ -108,6 +117,7 @@ function paint(container) {
   const isAdmin = admin.on(), hidden = admin.hidden();
   let list = filtered();
   if (!isAdmin) list = list.filter(r => !hidden.has(rowKey(r)));
+  list = applySort(list, sort, accessor);
 
   const totMat = new Set((DET || []).map(r => norm(r.Material)).filter(Boolean)).size;
   const totLotes = (DET || []).length;
@@ -118,9 +128,9 @@ function paint(container) {
     .filter(x => x.val > 0).sort((a, b) => b.val - a.val).slice(0, 10) : [];
 
   const head = `${isAdmin ? '<th></th>' : ''}
-    <th>Material + Descripción</th><th>Condición</th>${F.grupo ? '<th>Grupo</th>' : ''}<th class="num">Precio</th>
-    <th class="num">Disp 1031·1030</th><th class="num">Disp 1031·1032</th>
-    ${INVCODES.map(c => `<th class="num">Inv ${c}</th>`).join('')}<th class="num">Inv Suma</th><th class="num">Importe $</th>`;
+    ${th('Material + Descripción', 'mat', sort)}${th('Condición', 'cond', sort)}${F.grupo ? th('Grupo', 'grupo', sort) : ''}${th('Precio', 'precio', sort, 'num')}
+    ${th('Disp 1031·1030', 'disp1030', sort, 'num')}${th('Disp 1031·1032', 'disp1032', sort, 'num')}
+    ${INVCODES.map(c => th('Inv ' + c, 'inv' + c, sort, 'num')).join('')}${th('Inv Suma', 'invSuma', sort, 'num')}${th('Importe $', 'importe', sort, 'num')}`;
 
   const body = list.slice(0, 1000).map(r => {
     const mat = norm(r[F.material]), k = rowKey(r), isH = hidden.has(k);
@@ -158,6 +168,9 @@ function paint(container) {
     </div>`;
 
   wireZoom(container, 'inv', '.result .tbl table');
+  container.querySelectorAll('.result th.sortable').forEach(thEl => thEl.addEventListener('click', e => {
+    sort = cycleSort(sort, thEl.dataset.sort, e.shiftKey); paint(container);
+  }));
   container.querySelectorAll('.result [data-hk]').forEach(x => x.onclick = () => { admin.toggle(x.dataset.hk); paint(container); });
   container.querySelectorAll('.result [data-mat]').forEach(el => el.addEventListener('click', () =>
     showLotes(el.dataset.mat, el.dataset.cen || null, el.dataset.alm || null)));

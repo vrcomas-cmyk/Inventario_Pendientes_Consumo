@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portal DEGASA · Inventario + Sugerencias + Facturación</title>
+<link rel="stylesheet" href="css/portal.css">
+<!-- librerías de terceros (CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="top">
+  <h1>📦 Portal DEGASA <small id="fileInfo">Inventario (AppScript) · Sugerencias + Facturación (archivo)</small></h1>
+  <div class="tabs" id="tabs"></div>
+  <button class="btn primary" id="btnUpload" style="margin-left:10px">📂 Cargar reporte</button>
+  <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
+</div>
+
+<!-- Vista 1: Inventario por condición — nativo, datos del AppScript -->
+<div id="view-inv" class="view wrap"></div>
+
+<!-- Vista 2: Sugerencias -->
+<div id="view-sug" class="view wrap hidden"></div>
+
+<!-- Vista 3: Reporte de consumo -->
+<div id="view-cons" class="view wrap hidden"></div>
+
+<!-- Modal compartido -->
+<div class="ov" id="ov"><div class="modal" id="modal"></div></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

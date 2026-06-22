@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Inventario DEGASA · Dashboard Integrado</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/tabulator-tables@6.4.0/dist/css/tabulator.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ===== Barra superior fija ===== -->
+<header class="topbar">
+    <div class="brand">
+        <h1><i class="fas fa-boxes-stacked"></i> Portal Inventario DEGASA</h1>
+        <p>Control de materiales en tiempo real · clic en las cantidades para ver lotes por centro</p>
+    </div>
+
+    <nav class="view-tabs">
+        <button class="tab-btn active" data-panel="panel-resumen"><i class="fas fa-chart-pie"></i> Resumen General</button>
+        <button class="tab-btn" data-panel="panel-lotes"><i class="fas fa-clipboard-list"></i> Inventario por Lote</button>
+    </nav>
+
+    <div class="topbar-right">
+        <button class="icon-btn active" id="toggleKpis" title="Mostrar/ocultar indicadores"><i class="fas fa-chart-simple"></i> KPIs</button>
+        <button class="icon-btn active" id="toggleFilters" title="Mostrar/ocultar filtros"><i class="fas fa-sliders"></i> Filtros</button>
+        <div class="badge-update" id="lastUpdateBadge" title="Click para recargar manualmente">
+            <i class="fas fa-arrows-rotate"></i> <span id="lastUpdateTime">Cargando...</span>
+        </div>
+        <button class="icon-btn" id="railReload" title="Recargar datos"><i class="fas fa-rotate"></i></button>
+    </div>
+</header>
+
+<!-- ===== KPIs (se desplazan con la página) ===== -->
+<section class="kpis-strip" id="kpisStrip">
+    <div class="kpis-grid">
+        <div class="kpi-card">
+            <div class="kpi-icon"><i class="fas fa-barcode"></i></div>
+            <div class="kpi-info"><h3>Total Lotes Registrados</h3><div class="kpi-number" id="totalRegistros">0</div></div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-icon"><i class="fas fa-tags"></i></div>
+            <div class="kpi-info"><h3>Materiales Únicos</h3><div class="kpi-number" id="materialesUnicos">0</div></div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-icon"><i class="fas fa-cubes"></i></div>
+            <div class="kpi-info"><h3>Stock Global (Unidades)</h3><div class="kpi-number" id="totalUnidades">0</div></div>
+        </div>
+        <div class="kpi-card" style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border-color:#bfdbfe;">
+            <div class="kpi-icon" style="background:#dbeafe; color:#1e40af;"><i class="fas fa-cloud-arrow-down"></i></div>
+            <div class="kpi-info"><h3 style="color:#1e40af;">Sincronización</h3><div class="kpi-number" style="font-size:1rem; color:#1e40af;">Cada 5 min · auto</div></div>
+        </div>
+    </div>
+</section>
+
+<!-- ===== Panel: Resumen General ===== -->
+<div id="panel-resumen" class="tab-panel">
+    <div class="top-inv-card">
+        <h3><i class="fas fa-trophy"></i> <span id="topInvTitle">Top 5 Inventarios</span></h3>
+        <div class="top-inv-subtitle" id="topInvSubtitle">Calculando&hellip;</div>
+        <div class="top-inv-list" id="topInvList"><div style="color:#94a3b8; padding: 12px;">Calculando ranking&hellip;</div></div>
+    </div>
+
+    <div class="panel-body">
+        <aside class="filters-col">
+            <div class="table-controls">
+                <div class="qf-controls" id="stkControls"></div>
+                <div class="global-search">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="globalSearchCons" placeholder="Buscar (ej: 200 GASA 10X10)">
+                </div>
+                <div class="filter-builder">
+                    <button type="button" class="filter-builder-label filter-toggle" aria-expanded="true"><i class="fas fa-filter"></i> Filtrar <i class="fas fa-chevron-down chev"></i></button>
+                    <div class="filter-fields">
+                        <select id="filterCol2"></select>
+                        <input type="text" id="filterVal2" placeholder="Valor (Enter para agregar)...">
+                        <button class="filter-add-btn" id="filterAdd2"><i class="fas fa-plus"></i> Agregar</button>
+                        <button id="toggleExtraCols" class="toolbar-btn" style="background: #f1f5f9; border-color: #cbd5e1;"><i class="fas fa-eye-slash"></i> Grupo/Sector</button>
+                    </div>
+                </div>
+                <div class="filter-row">
+                    <div class="filter-chips-active" id="filterChips2"></div>
+                    <button class="filter-clear-all hidden" id="filterClear2"><i class="fas fa-eraser"></i> Limpiar todos</button>
+                </div>
+                <div class="inv-selector" id="invSelector">
+                    <span class="inv-selector-label"><i class="fas fa-sliders"></i> Mostrar inventarios:</span>
+                    <span style="color:#94a3b8; font-size:0.85rem; font-style:italic;">Descubriendo centros&hellip;</span>
+                </div>
+                <div class="table-toolbar">
+                    <div class="toolbar-group">
+                        <button class="toolbar-btn" id="exportExcel2"><i class="fas fa-file-excel"></i> Excel</button>
+                        <button class="toolbar-btn" id="exportCSV2"><i class="fas fa-file-csv"></i> CSV</button>
+                    </div>
+                    <div class="legend legend-inline">
+                        <span class="legend-item"><span class="legend-swatch" style="background:#fde68a;"></span> Bajo</span>
+                        <span class="legend-item"><span class="legend-swatch" style="background:#bae6fd;"></span> Medio</span>
+                        <span class="legend-item"><span class="legend-swatch" style="background:#86efac;"></span> Alto</span>
+                    </div>
+                    <div class="toolbar-group">
+                        <span class="zoom-label">Zoom</span>
+                        <input type="range" min="70" max="150" value="100" class="zoom-range" id="zoom2">
+                        <span id="zoomValue2">100%</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <div class="table-col">
+            <div class="table-card">
+                <div class="table-header"><h2><i class="fas fa-calculator"></i> Consolidado y Precios</h2></div>
+                <div class="zoom-wrapper" id="zoomWrap2">
+                    <div id="tabla2"><div class="loader-overlay"><div class="loader-spinner"></div> Construyendo matriz de resumen...</div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Panel: Inventario por Lote ===== -->
+<div id="panel-lotes" class="tab-panel hidden">
+    <div class="panel-body">
+        <aside class="filters-col">
+            <div class="table-controls">
+                <div class="qf-controls" id="cadControls"></div>
+                <div class="filter-builder">
+                    <button type="button" class="filter-builder-label filter-toggle" aria-expanded="true"><i class="fas fa-filter"></i> Filtrar <i class="fas fa-chevron-down chev"></i></button>
+                    <div class="filter-fields">
+                        <select id="filterCol1"></select>
+                        <input type="text" id="filterVal1" placeholder="Valor (Enter para agregar)...">
+                        <button class="filter-add-btn" id="filterAdd1"><i class="fas fa-plus"></i> Agregar</button>
+                    </div>
+                </div>
+                <div class="filter-row">
+                    <div class="filter-chips-active" id="filterChips1"></div>
+                    <button class="filter-clear-all hidden" id="filterClear1"><i class="fas fa-eraser"></i> Limpiar todos</button>
+                </div>
+                <div class="table-toolbar">
+                    <div class="toolbar-group">
+                        <button class="toolbar-btn" id="exportExcel1"><i class="fas fa-file-excel"></i> Excel</button>
+                        <button class="toolbar-btn" id="exportCSV1"><i class="fas fa-file-csv"></i> CSV</button>
+                    </div>
+                    <div class="legend legend-inline">
+                        <span class="legend-item"><span class="legend-swatch" style="background:#fee2e2;"></span> Vencido</span>
+                        <span class="legend-item"><span class="legend-swatch" style="background:#fed7aa;"></span> &le;3m</span>
+                        <span class="legend-item"><span class="legend-swatch" style="background:#fef3c7;"></span> &le;6m</span>
+                        <span class="legend-item"><span class="legend-swatch" style="background:#dcfce7;"></span> &gt;6m</span>
+                    </div>
+                    <div class="toolbar-group">
+                        <span class="zoom-label">Zoom</span>
+                        <input type="range" min="70" max="150" value="100" class="zoom-range" id="zoom1">
+                        <span id="zoomValue1">100%</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <div class="table-col">
+            <div class="table-card">
+                <div class="table-header"><h2><i class="fas fa-pallet"></i> Detalle de Existencias por Lote</h2></div>
+                <div class="zoom-wrapper" id="zoomWrap1">
+                    <div id="tabla1"><div class="loader-overlay"><div class="loader-spinner"></div> Cargando datos del servidor...</div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de lotes -->
+<div id="loteModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modalTitle">Lotes disponibles</h3>
+            <button class="close-modal">&times;</button>
+        </div>
+        <div class="modal-body"><div id="modalTabla" style="min-height: 300px;"></div></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.4.0/dist/js/tabulator.min.js"></script>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

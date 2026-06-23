@@ -144,3 +144,9 @@ th.sortable:hover{color:var(--tx)}
 .pager .btn{padding:6px 10px;font-size:12px}
 .pager .btn:disabled{opacity:.4;cursor:default}
 .pager select{padding:6px 8px;border:1px solid var(--bd);background:var(--panel2);color:var(--tx);border-radius:8px}
+
+/* ===== selector de secciones (Sugerencias / Consumo) ===== */
+.segm{display:inline-flex;gap:0;border:1px solid var(--bd);border-radius:10px;overflow:hidden}
+.segm .seg{background:var(--panel2);color:var(--mut);border:none;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600}
+.segm .seg:hover{color:var(--tx)}
+.segm .seg.on{background:var(--acc);color:#04140a}

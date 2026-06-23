@@ -4,7 +4,8 @@
    Condición/Grupo/Sector + multi-filtro, zoom, admin (ocultar filas), drills.
    =========================================================================== */
 import { norm, num, fmt, money, esc } from './utils.js';
-import { store, C } from './store.js';
+import { store, C, RC } from './store.js';
+import { serieMatDest, tendenciaTexto, mesLabel, aMesAnio } from './resumenFac.js';
 import { openModal, pill, trendText, rankingHTML } from './ui.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
@@ -240,12 +241,33 @@ function showLotes(material, centro, almacen) {
       <td>${bl ? `<span class="pill amb">${esc(bl)}</span>` : '—'}</td>
       <td>${pill(it.status.label, it.status.cls)}</td><td>${trendText(it.tend)}</td></tr>`;
   }).join('');
-  const sugCard = `<div class="tablecard" style="margin-top:14px">
-    <h3>📋 Sugerencias con este material (${sug.length}) <span class="hint">clic en una fila para ver el detalle</span></h3>
-    <div class="tbl"><table>
+  const sugTable = `<div class="tbl"><table>
       <thead><tr><th>Pedido / OC</th><th>Cliente</th><th>Centro/Alm</th><th class="num">Pendiente</th><th class="num">Precio</th><th>Bloqueado</th><th>Estado</th><th>Tendencia</th></tr></thead>
       <tbody>${sugBody || '<tr><td colspan="8" class="muted" style="padding:14px;text-align:center">Sin sugerencias para este material.</td></tr>'}</tbody>
-    </table></div></div>`;
+    </table></div>`;
+
+  // Consumo: clientes que han facturado este material
+  const consRows = (store.ROLE.cons ? store.WB[store.ROLE.cons] || [] : [])
+    .filter(r => norm(r[RC.material]) === norm(material))
+    .sort((a, b) => mesKeyC(b[RC.ultMes]) - mesKeyC(a[RC.ultMes]));
+  const consBody = consRows.map(r => {
+    const tnd = tendenciaTexto(serieMatDest(r[RC.dest], r[RC.material]));
+    return `<tr>
+      <td>${esc(r[RC.razon])}<div class="sub">Solic ${esc(r[RC.solic])} · Dest ${esc(r[RC.dest])}</div></td>
+      <td>${esc(mLblC(r[RC.ultMes]))}</td>
+      <td class="num">${fmt(r[RC.cantUlt])}</td><td class="num">${money(r[RC.impUlt])}</td>
+      <td class="num">${money(r[RC.precioUltUni])}</td>
+      <td class="num">${fmt(r[RC.promedio])}</td><td class="num">${fmt(r[RC.consumoAct])}</td>
+      <td>${trendText(tnd)}</td></tr>`;
+  }).join('');
+  const consTable = `<div class="tbl"><table>
+      <thead><tr><th>Cliente</th><th>Última vez</th><th class="num">Cant. última</th><th class="num">Importe última</th><th class="num">P.U. última</th><th class="num">Consumo prom.</th><th class="num">Consumo actual</th><th>Tendencia</th></tr></thead>
+      <tbody>${consBody || '<tr><td colspan="8" class="muted" style="padding:14px;text-align:center">Sin facturación de consumo para este material.</td></tr>'}</tbody>
+    </table></div>`;
+
+  const seg = `<div class="segm" style="margin-top:14px">
+    <button class="seg on" data-view="sug">📋 Sugerencias (${sug.length})</button>
+    <button class="seg" data-view="cons">📊 Consumo (${consRows.length})</button></div>`;
 
   openModal(`
     <button class="x" onclick="closeModal()">×</button>
@@ -255,8 +277,21 @@ function showLotes(material, centro, almacen) {
       <table><thead><tr><th>Centro</th><th>Almacén</th><th>Lote</th><th>Caducidad</th><th class="num">Días</th><th>Estado</th><th class="num">Cantidad</th></tr></thead>
       <tbody>${body || '<tr><td colspan="7" class="muted" style="padding:16px;text-align:center">Sin lotes.</td></tr>'}</tbody></table>
     </div></div>
-    ${sugCard}`);
+    ${seg}
+    <div class="tablecard" data-pane="sug"><h3>📋 Sugerencias con este material <span class="hint">clic en una fila para ver el detalle</span></h3>${sugTable}</div>
+    <div class="tablecard" data-pane="cons" style="display:none"><h3>📊 Clientes que han facturado este material</h3>${consTable}</div>`);
+
+  const panes = { sug: document.querySelector('#modal [data-pane="sug"]'), cons: document.querySelector('#modal [data-pane="cons"]') };
+  document.querySelectorAll('#modal .seg').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('#modal .seg').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    const v = btn.dataset.view;
+    panes.sug.style.display = v === 'sug' ? '' : 'none';
+    panes.cons.style.display = v === 'cons' ? '' : 'none';
+  }));
   document.querySelectorAll('#modal tr[data-si]').forEach(tr => tr.addEventListener('click', () => {
     import('./sugerencias.js').then(m => m.openDetalle(sug[+tr.dataset.si]));
   }));
 }
+const mLblC = v => { const m = aMesAnio(v); return m ? mesLabel(m) : norm(v); };
+const mesKeyC = v => { const m = aMesAnio(v); if (!m) return 0; const [mm, yy] = m.split('/').map(Number); return yy * 12 + mm; };

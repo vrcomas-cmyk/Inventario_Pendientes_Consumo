@@ -4,10 +4,12 @@
    Condición/Grupo/Sector + multi-filtro, zoom, admin (ocultar filas), drills.
    =========================================================================== */
 import { norm, num, fmt, money, esc } from './utils.js';
-import { openModal, pill, rankingHTML } from './ui.js';
+import { store, C } from './store.js';
+import { openModal, pill, trendText, rankingHTML } from './ui.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
 import { makeSort, cycleSort, applySort, th } from './sort.js';
+import { exportXlsx, stamp } from './exportx.js';
 import { INV_CFG } from './invConfig.js';
 
 let CONS = null, DET = null, INVCODES = [], F = {}, loaded = false, loading = false, loadErr = '';
@@ -105,12 +107,31 @@ export function renderInventario(container) {
                 ${F.grupo ? sel('grupo', flt.grupo, distinct(F.grupo), 'Grupo (todos)') : ''}
                 ${F.sector ? sel('sector', flt.sector, distinct(F.sector), 'Sector (todos)') : ''}`;
   const adminBtn = `<button class="btn ${isAdmin ? 'primary' : ''}" data-admin>${isAdmin ? '🔓 Admin ON' : '🔒 Admin'}</button>`;
+  const expBtn = `<button class="btn" data-exp>⬇️ Excel</button>`;
 
-  container.innerHTML = `${toolbarHTML(cols(), flt, `${cats}${zoomHTML('inv')}${adminBtn}`)}<div class="result"></div>`;
+  container.innerHTML = `${toolbarHTML(cols(), flt, `${cats}${zoomHTML('inv')}${expBtn}${adminBtn}`)}<div class="result"></div>`;
   wireToolbar(container, flt, () => renderInventario(container), () => paint(container), makeSuggest(CONS || [], cols()));
   container.querySelectorAll('[data-cat]').forEach(s => s.onchange = e => { flt[e.target.dataset.cat] = e.target.value; paint(container); });
   container.querySelector('[data-admin]').onclick = () => { admin.setOn(!isAdmin); renderInventario(container); };
+  container.querySelector('[data-exp]').onclick = () => exportInv();
   paint(container);
+}
+
+function exportInv() {
+  const isAdmin = admin.on(), hidden = admin.hidden();
+  let list = filtered(); if (!isAdmin) list = list.filter(r => !hidden.has(rowKey(r)));
+  list = applySort(list, sort, accessor);
+  const rowsX = list.map(r => {
+    const o = {
+      'Material': norm(r[F.material]), 'Descripción': norm(r[F.texto]), 'Condición': norm(r[F.cond]),
+      'Grupo': norm(r[F.grupo]), 'Sector': norm(r[F.sector]), 'Precio': num(r[F.precio]),
+      'Disp 1031-1030': num(r[F.disp1030]), 'Disp 1031-1032': num(r[F.disp1032]),
+    };
+    INVCODES.forEach(c => o['Inv ' + c] = num(r['Inv ' + c]));
+    o['Inv Suma'] = num(r[F.invSuma]); o['Importe $'] = num(r[F.importe]);
+    return o;
+  });
+  exportXlsx(`inventario_${stamp()}.xlsx`, rowsX, 'Inventario');
 }
 
 function paint(container) {
@@ -208,6 +229,24 @@ function showLotes(material, centro, almacen) {
       <td>${esc(r.Centro)}</td><td>${esc(r['Almacén'])}</td><td>${esc(r.Lote)}</td><td>${esc(r.FechaCaducidad)}</td>
       <td class="num"><span class="tnd ${d != null && d <= INV_CFG.expiry.mes1 ? 'down' : ''}">${d == null ? '—' : d}</span></td>
       <td>${pill(estadoCad(d), cadCls(d))}</td><td class="num">${fmt(r.CantidadDisp)}</td></tr>`).join('');
+  // Sugerencias (BO) que tienen este material
+  const sug = (store.BO || []).filter(it => norm(it.bo[C.matBase]) === norm(material));
+  const sugBody = sug.map((it, i) => { const b = it.bo, bl = norm(b[C.bloq]);
+    return `<tr class="click ${bl ? 'bloq' : ''}" data-si="${i}">
+      <td><b>${esc(b[C.pedido])}</b><div class="sub">OC ${esc(b[C.oc]) || '—'}</div></td>
+      <td>${esc(b[C.razon])}<div class="sub">Solic ${esc(b[C.solic])} · Dest ${esc(b[C.dest])}</div></td>
+      <td>${esc(b[C.centro])}${norm(b[C.alm]) ? ' / ' + esc(b[C.alm]) : ''}</td>
+      <td class="num">${fmt(b[C.pend])}</td><td class="num">${money(b[C.precio])}</td>
+      <td>${bl ? `<span class="pill amb">${esc(bl)}</span>` : '—'}</td>
+      <td>${pill(it.status.label, it.status.cls)}</td><td>${trendText(it.tend)}</td></tr>`;
+  }).join('');
+  const sugCard = `<div class="tablecard" style="margin-top:14px">
+    <h3>📋 Sugerencias con este material (${sug.length}) <span class="hint">clic en una fila para ver el detalle</span></h3>
+    <div class="tbl"><table>
+      <thead><tr><th>Pedido / OC</th><th>Cliente</th><th>Centro/Alm</th><th class="num">Pendiente</th><th class="num">Precio</th><th>Bloqueado</th><th>Estado</th><th>Tendencia</th></tr></thead>
+      <tbody>${sugBody || '<tr><td colspan="8" class="muted" style="padding:14px;text-align:center">Sin sugerencias para este material.</td></tr>'}</tbody>
+    </table></div></div>`;
+
   openModal(`
     <button class="x" onclick="closeModal()">×</button>
     <h2>${titulo}</h2>
@@ -215,5 +254,9 @@ function showLotes(material, centro, almacen) {
     <div class="tablecard"><div class="tbl">
       <table><thead><tr><th>Centro</th><th>Almacén</th><th>Lote</th><th>Caducidad</th><th class="num">Días</th><th>Estado</th><th class="num">Cantidad</th></tr></thead>
       <tbody>${body || '<tr><td colspan="7" class="muted" style="padding:16px;text-align:center">Sin lotes.</td></tr>'}</tbody></table>
-    </div></div>`);
+    </div></div>
+    ${sugCard}`);
+  document.querySelectorAll('#modal tr[data-si]').forEach(tr => tr.addEventListener('click', () => {
+    import('./sugerencias.js').then(m => m.openDetalle(sug[+tr.dataset.si]));
+  }));
 }

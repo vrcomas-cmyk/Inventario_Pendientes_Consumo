@@ -5,13 +5,16 @@
    =========================================================================== */
 import { norm, num, fmt, money, esc, mesKey } from './utils.js';
 import { store, RC } from './store.js';
-import { serieMatDest, serieDeConsumo, clasificarEstado, tendenciaTexto, comparativa, aMesAnio,
+import { serieMatDest, serieDeConsumo, clasificarEstado, tendenciaTexto, comparativa, aMesAnio, mesLabel,
          rankingMaterialesAvg12, rankingSolicitantes, ESTADOS } from './resumenFac.js';
 import { openModal, drawSerie, pill, trendText, comparativaHTML, rankingHTML } from './ui.js';
 import { openEvol } from './sugerencias.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
 import { makeSort, cycleSort, applySort, th } from './sort.js';
+import { exportXlsx, stamp } from './exportx.js';
+
+const mLbl = v => { const m = aMesAnio(v); return m ? mesLabel(m) : norm(v); };
 
 const flt = makeFilters();
 flt.estado = '';
@@ -42,7 +45,7 @@ const SORTV = {
   consumoAct: r => num(r[RC.consumoAct]), promedio: r => num(r[RC.promedio]),
   ultMes: r => mesKey(aMesAnio(r[RC.ultMes])), cantUlt: r => num(r[RC.cantUlt]),
   penFecha: r => mesKey(aMesAnio(r[RC.penFecha])), cantPen: r => num(r[RC.cantPen]),
-  precioMin: r => num(r[RC.precioMin]), precioMax: r => num(r[RC.precioMax]), precioProm: r => num(r[RC.precioProm]),
+  precioUltUni: r => num(r[RC.precioUltUni]), precioPenUni: r => num(r[RC.precioPenUni]),
   estado: r => ESTRANK[statusOf(r).key] ?? -1, tend: r => ({ up: 2, flat: 1, down: 0 }[tendOf(r).dir] ?? 1),
 };
 const accessor = (r, k) => SORTV[k] ? SORTV[k](r) : '';
@@ -75,9 +78,11 @@ export function renderConsumo(container) {
   }
   resetCache();
   const estSel = `<select data-est><option value="">Estado (todos)</option>${ESTADOS.map(([k, l]) => `<option value="${k}" ${flt.estado === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
-  container.innerHTML = `${toolbarHTML(cols(), flt, `${estSel}${zoomHTML('cons')}`)}<div class="result"></div>`;
+  const expBtn = `<button class="btn" data-exp>⬇️ Excel</button>`;
+  container.innerHTML = `${toolbarHTML(cols(), flt, `${estSel}${zoomHTML('cons')}${expBtn}`)}<div class="result"></div>`;
   wireToolbar(container, flt, () => renderConsumo(container), () => { page = 0; paint(container); }, makeSuggest(rows(), cols()));
   container.querySelector('[data-est]').onchange = e => { flt.estado = e.target.value; page = 0; paint(container); };
+  container.querySelector('[data-exp]').onclick = () => exportConsumo();
   paint(container);
 }
 
@@ -91,29 +96,26 @@ function paint(container) {
   const rk1 = rankingMaterialesAvg12();
   const rk2 = rankingSolicitantes();
 
-  const H = k => SORTV[k] ? th : null;     // helper
   const head = [
-    th('Solicitante', 'solic', sort), th('Destinatario', 'dest', sort), th('Cliente', 'cliente', sort),
-    th('Material', 'material', sort), th('Descripción', 'desc', sort),
+    th('Cliente (Solic › Razón › Dest)', 'cliente', sort),
+    th('Material', 'material', sort),
     th('Consumo actual', 'consumoAct', sort, 'num'), th('Prom. mensual', 'promedio', sort, 'num'),
-    th('Último mes', 'ultMes', sort), th('Cant. última', 'cantUlt', sort, 'num'),
-    th('Penúltima fecha', 'penFecha', sort), th('Cant. penúlt.', 'cantPen', sort, 'num'),
-    th('Precio mín', 'precioMin', sort, 'num'), th('Precio máx', 'precioMax', sort, 'num'), th('Precio prom', 'precioProm', sort, 'num'),
+    th('Último mes', 'ultMes', sort), th('Cant. última', 'cantUlt', sort, 'num'), th('P.U. última', 'precioUltUni', sort, 'num'),
+    th('Penúltimo mes', 'penFecha', sort), th('Cant. penúlt.', 'cantPen', sort, 'num'), th('P.U. penúlt.', 'precioPenUni', sort, 'num'),
     th('Estado', 'estado', sort), th('Tendencia', 'tend', sort),
   ].join('');
 
   const body = slice.map(r => {
     const st = statusOf(r), tn = tendOf(r);
     return `<tr data-k="${esc(keyR(r))}">
-      <td><span class="lnk" data-ev="solic" data-key="${esc(r[RC.solic])}">${esc(r[RC.solic])}</span></td>
-      <td><span class="lnk" data-ev="dest" data-key="${esc(r[RC.dest])}">${esc(r[RC.dest])}</span></td>
-      <td>${esc(r[RC.razon])}</td>
-      <td><span class="lnk" data-ev="mat">${esc(r[RC.material])}</span></td>
-      <td>${esc(r[RC.texto])}</td>
+      <td><div>${esc(r[RC.razon])}</div>
+        <div style="font-size:11px;margin-top:2px">
+          <span class="lnk" data-ev="solic" data-key="${esc(r[RC.solic])}">Solic ${esc(r[RC.solic])}</span> ·
+          <span class="lnk" data-ev="dest" data-key="${esc(r[RC.dest])}">Dest ${esc(r[RC.dest])}</span></div></td>
+      <td><span class="lnk" data-ev="mat">${esc(r[RC.material])}</span><div class="sub">${esc(r[RC.texto])}</div></td>
       <td class="num">${fmt(r[RC.consumoAct])}</td><td class="num">${fmt(r[RC.promedio])}</td>
-      <td>${esc(r[RC.ultMes])}</td><td class="num">${fmt(r[RC.cantUlt])}</td>
-      <td>${esc(r[RC.penFecha])}</td><td class="num">${fmt(r[RC.cantPen])}</td>
-      <td class="num">${money(r[RC.precioMin])}</td><td class="num">${money(r[RC.precioMax])}</td><td class="num">${money(r[RC.precioProm])}</td>
+      <td>${esc(mLbl(r[RC.ultMes]))}</td><td class="num">${fmt(r[RC.cantUlt])}</td><td class="num">${money(r[RC.precioUltUni])}</td>
+      <td>${esc(mLbl(r[RC.penFecha]))}</td><td class="num">${fmt(r[RC.cantPen])}</td><td class="num">${money(r[RC.precioPenUni])}</td>
       <td>${pill(st.label, st.cls)}</td><td>${trendText(tn)}</td>
     </tr>`;
   }).join('');
@@ -121,10 +123,10 @@ function paint(container) {
   container.querySelector('.result').innerHTML = `
     <div class="invtop">
       <div class="kpis2x2" style="flex:0 0 300px;min-width:260px">
-        <div class="kpi sm"><div class="lbl">Renglones (filtro)</div><div class="val">${fmt(total)}</div><div class="sub">de ${fmt(rows().length)}</div></div>
         <div class="kpi sm"><div class="lbl">Al corriente</div><div class="val tnd up">${fmt(list.filter(r => statusOf(r).key === 'corriente').length)}</div></div>
         <div class="kpi sm"><div class="lbl">En riesgo</div><div class="val tnd down">${fmt(list.filter(r => statusOf(r).key === 'riesgo').length)}</div></div>
-        <div class="kpi sm"><div class="lbl">Sin compra +1 año</div><div class="val tnd flat">${fmt(list.filter(r => statusOf(r).key === 'sinanio').length)}</div></div>
+        <div class="kpi sm"><div class="lbl">Reactivación</div><div class="val tnd vio">${fmt(list.filter(r => statusOf(r).key === 'reactiva').length)}</div></div>
+        <div class="kpi sm"><div class="lbl">Nueva compra</div><div class="val tnd vio">${fmt(list.filter(r => statusOf(r).key === 'nueva').length)}</div></div>
       </div>
       ${rankingHTML(rk1, { title: '🏆 Materiales · facturación prom. (últ. 12 m)', money: true })}
       ${rankingHTML(rk2, { title: '🏅 Solicitantes · mayor facturación', money: true })}
@@ -136,7 +138,7 @@ function paint(container) {
     <div class="tablecard">
       <h3>📊 Reporte de Consumo <span class="hint">clic encabezado = ordenar (Shift = varias) · Solic/Dest/Material = facturación</span></h3>
       <div class="tbl"><table><thead><tr>${head}</tr></thead>
-        <tbody>${body || '<tr><td colspan="16" class="muted" style="padding:20px;text-align:center">Sin resultados</td></tr>'}</tbody></table></div>
+        <tbody>${body || '<tr><td colspan="12" class="muted" style="padding:20px;text-align:center">Sin resultados</td></tr>'}</tbody></table></div>
       <div class="pager">
         <button class="btn" data-pg="0" ${page === 0 ? 'disabled' : ''}>« Inicio</button>
         <button class="btn" data-pg="${page - 1}" ${page === 0 ? 'disabled' : ''}>‹ Anterior</button>
@@ -161,6 +163,22 @@ function paint(container) {
     else if (kind === 'dest') openEvol('dest', el.dataset.key);
     else if (kind === 'mat') { const r = rows().find(x => keyR(x) === el.closest('tr').dataset.k); openMaterial(r); }
   }));
+}
+
+function exportConsumo() {
+  const list = applySort(filtered(), sort, accessor);
+  const rowsX = list.map(r => {
+    const st = statusOf(r), tn = tendOf(r);
+    return {
+      'Solicitante': norm(r[RC.solic]), 'Destinatario': norm(r[RC.dest]), 'Razón social': norm(r[RC.razon]),
+      'Material': norm(r[RC.material]), 'Descripción': norm(r[RC.texto]),
+      'Consumo actual': num(r[RC.consumoAct]), 'Prom. mensual': num(r[RC.promedio]),
+      'Último mes': mLbl(r[RC.ultMes]), 'Cant. última': num(r[RC.cantUlt]), 'P.U. última': num(r[RC.precioUltUni]),
+      'Penúltimo mes': mLbl(r[RC.penFecha]), 'Cant. penúltima': num(r[RC.cantPen]), 'P.U. penúltima': num(r[RC.precioPenUni]),
+      'Estado': st.label, 'Tendencia': tn.txt,
+    };
+  });
+  exportXlsx(`consumo_${stamp()}.xlsx`, rowsX, 'Consumo');
 }
 
 function openMaterial(r) {

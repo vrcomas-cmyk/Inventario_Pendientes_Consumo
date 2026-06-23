@@ -4,13 +4,14 @@
 import { norm, num, fmt, money, esc } from './utils.js';
 import { store, C } from './store.js';
 import { serieMatDest, serieSolic, serieDest, consumoDe, clasificarEstado,
-         tendenciaTexto, comparativa, materialesDe } from './resumenFac.js';
+         tendenciaTexto, comparativa, materialesDe, mesLabel } from './resumenFac.js';
 import { ESTADOS } from './resumenFac.js';
 import { openModal, drawSerie, pill, trendText, invGrid, rankingHTML,
          comparativaHTML, materialesTablaHTML } from './ui.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
 import { makeSort, cycleSort, applySort, th } from './sort.js';
+import { exportXlsx, stamp } from './exportx.js';
 import { grupoCliente, ejecutivoNombre, matSector, matGrupo, loadEnrich, enrichTs, normCode } from './enrich.js';
 import { precioInv } from './inventario.js';
 
@@ -36,7 +37,10 @@ export function buildBO(rows) {
   return [...map.values()].map(g => {
     const b = g.origen || g.any;
     const serie = serieMatDest(b[C.dest], b[C.matBase]);
-    return { bo: b, fuentes: g.fuentes, k: keyOf(b), serie,
+    // Consumo promedio robusto: toma el del origen; si viene vacío/0, busca en el grupo
+    let cp = num(b[C.consumo]);
+    if (!cp) { for (const rr of [g.origen, g.any, ...g.fuentes].filter(Boolean)) { const v = num(rr[C.consumo]); if (v) { cp = v; break; } } }
+    return { bo: b, fuentes: g.fuentes, k: keyOf(b), serie, consumoProm: cp,
       status: clasificarEstado(serie, num(b[C.pend]) > 0), tend: tendenciaTexto(serie), cons: consumoDe(serie) };
   });
 }
@@ -49,7 +53,7 @@ const SORTV = {
   grupocli: it => grupoCli(it.bo), pedido: it => it.bo[C.pedido], oc: it => it.bo[C.oc], fecha: it => it.bo[C.fecha],
   cliente: it => it.bo[C.razon], ejecutivo: it => ejecDe(it.bo), centro: it => it.bo[C.centro],
   mat: it => it.bo[C.matBase], desc: it => it.bo[C.descSol], sector: it => sectorDe(it.bo), grupoart: it => grupoArt(it.bo),
-  cantped: it => num(it.bo[C.cantPed]), pend: it => num(it.bo[C.pend]), precio: it => num(it.bo[C.precio]), consumo: it => num(it.bo[C.consumo]),
+  cantped: it => num(it.bo[C.cantPed]), pend: it => num(it.bo[C.pend]), precio: it => num(it.bo[C.precio]), consumo: it => num(it.consumoProm),
   inv1030: it => num(it.bo[C.inv1030]), inv1031: it => num(it.bo[C.inv1031]), inv1032: it => num(it.bo[C.inv1032]), inv1060: it => num(it.bo[C.inv1060]),
   bloq: it => bloqDe(it.bo), estado: it => ESTRANK[it.status.key] ?? 0, tend: it => ({ up: 2, flat: 1, down: 0 }[it.tend.dir] ?? 1),
   fuentes: it => it.fuentes.length,
@@ -91,10 +95,12 @@ export function renderSug(container) {
   const fueSel = `<select data-fue><option value="">Fuentes</option><option value="si" ${flt.fuente === 'si' ? 'selected' : ''}>Con fuentes</option><option value="no" ${flt.fuente === 'no' ? 'selected' : ''}>Sin fuentes</option></select>`;
   const ts = enrichTs();
   const updBtn = `<button class="btn" data-upd title="${ts ? 'Última actualización: ' + new Date(ts).toLocaleString('es-MX') : 'Sin descargar aún'}">🔄 Actualizar Ejecutivos/Materiales</button>`;
-  container.innerHTML = `${toolbarHTML(cols(), flt, `${estSel}${fueSel}${zoomHTML('sug')}${updBtn}`)}<div class="result"></div>`;
+  const expBtn = `<button class="btn" data-exp>⬇️ Excel</button>`;
+  container.innerHTML = `${toolbarHTML(cols(), flt, `${estSel}${fueSel}${zoomHTML('sug')}${expBtn}${updBtn}`)}<div class="result"></div>`;
   wireToolbar(container, flt, () => renderSug(container), () => paint(container), makeSuggest(store.BO, cols()));
   container.querySelector('[data-est]').onchange = e => { flt.estado = e.target.value; paint(container); };
   container.querySelector('[data-fue]').onchange = e => { flt.fuente = e.target.value; paint(container); };
+  container.querySelector('[data-exp]').onclick = () => exportSug();
   container.querySelector('[data-upd]').onclick = ev => { ev.target.textContent = '⏳ Actualizando…'; loadEnrich(true).then(() => renderSug(container)); };
   paint(container);
 }
@@ -128,12 +134,10 @@ function paint(container) {
           <span class="lnk" data-ev="dest"  data-k="${esc(b[C.dest])}">Dest ${esc(b[C.dest])}</span></div></td>
       <td>${esc(ejecDe(b)) || '—'}</td>
       <td>${cen}</td>
-      <td><span class="lnk" data-ev="det" data-i="${i}">${esc(b[C.matBase])}</span></td>
-      <td>${esc(b[C.descSol])}</td>
-      <td>${esc(sectorDe(b)) || '—'}</td>
-      <td>${esc(grupoArt(b)) || '—'}</td>
+      <td><span class="lnk" data-ev="det" data-i="${i}">${esc(b[C.matBase])}</span><div class="sub">${esc(b[C.descSol])}</div></td>
+      <td>${esc(sectorDe(b)) || '—'}<div class="sub">${esc(grupoArt(b)) || ''}</div></td>
       <td class="num">${fmt(b[C.cantPed])}</td><td class="num">${fmt(b[C.pend])}</td>
-      <td class="num">${money(b[C.precio])}</td><td class="num">${fmt(b[C.consumo])}</td>
+      <td class="num">${money(b[C.precio])}</td><td class="num">${fmt(it.consumoProm)}</td>
       ${invCell(b[C.inv1030], b[C.tr1030])}${invCell(b[C.inv1031], b[C.tr1031])}
       ${invCell(b[C.inv1032], b[C.tr1032])}${invCell(b[C.inv1060], 0)}
       <td>${bl ? `<span class="pill amb">${esc(bl)}</span>` : '—'}</td>
@@ -161,12 +165,12 @@ function paint(container) {
         <thead><tr>
           ${th('Grupo de cliente', 'grupocli', sort)}${th('Pedido / OC', 'pedido', sort)}${th('Fecha', 'fecha', sort)}
           ${th('Cliente', 'cliente', sort)}${th('Ejecutivo', 'ejecutivo', sort)}${th('Centro/Alm', 'centro', sort)}
-          ${th('Material base', 'mat', sort)}${th('Descripción material', 'desc', sort)}${th('Sector', 'sector', sort)}${th('Grupo art.', 'grupoart', sort)}
+          ${th('Material base / Descripción', 'mat', sort)}${th('Sector / Grupo art.', 'sector', sort)}
           ${th('Cant. ped.', 'cantped', sort, 'num')}${th('Pendiente', 'pend', sort, 'num')}${th('Precio', 'precio', sort, 'num')}${th('Consumo', 'consumo', sort, 'num')}
           ${th('Inv 1030', 'inv1030', sort, 'num')}${th('Inv 1031', 'inv1031', sort, 'num')}${th('Inv 1032', 'inv1032', sort, 'num')}${th('Inv 1060', 'inv1060', sort, 'num')}
           ${th('Bloqueado', 'bloq', sort)}${th('Estado', 'estado', sort)}${th('Tendencia', 'tend', sort)}${th('Fuentes', 'fuentes', sort, 'num')}
         </tr></thead>
-        <tbody>${rows || '<tr><td colspan="22" class="muted" style="padding:20px;text-align:center">Sin resultados</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="20" class="muted" style="padding:20px;text-align:center">Sin resultados</td></tr>'}</tbody>
       </table></div>
     </div>`;
 
@@ -185,6 +189,23 @@ function paint(container) {
   container.querySelectorAll('.result tr.click').forEach(tr => tr.addEventListener('click', () => openDetalle(filtered()[+tr.dataset.i])));
 }
 
+function exportSug() {
+  const list = applySort(filtered(), sort, accessor);
+  const rowsX = list.map(it => { const b = it.bo;
+    return {
+      'Grupo de cliente': grupoCli(b), 'Código grupo': normCode(b[C.gpo]),
+      'Pedido': norm(b[C.pedido]), 'OC': norm(b[C.oc]), 'Fecha': norm(b[C.fecha]),
+      'Razón social': norm(b[C.razon]), 'Solicitante': norm(b[C.solic]), 'Destinatario': norm(b[C.dest]),
+      'Ejecutivo': ejecDe(b), 'Centro': norm(b[C.centro]), 'Almacén': norm(b[C.alm]),
+      'Material base': norm(b[C.matBase]), 'Descripción': norm(b[C.descSol]), 'Sector': sectorDe(b), 'Grupo art.': grupoArt(b),
+      'Cant. pedida': num(b[C.cantPed]), 'Pendiente': num(b[C.pend]), 'Precio': num(b[C.precio]), 'Consumo prom.': num(it.consumoProm),
+      'Inv 1030': num(b[C.inv1030]), 'Inv 1031': num(b[C.inv1031]), 'Inv 1032': num(b[C.inv1032]), 'Inv 1060': num(b[C.inv1060]),
+      'Bloqueado': bloqDe(b), 'Estado': it.status.label, 'Tendencia': it.tend.txt, 'Fuentes': it.fuentes.length,
+    };
+  });
+  exportXlsx(`sugerencias_${stamp()}.xlsx`, rowsX, 'Sugerencias');
+}
+
 /* encabezado: solicitante › razón social › destinatario */
 const cabecera = b => `<h2>${esc(b[C.solic])} › ${esc(b[C.razon])} › ${esc(b[C.dest])}</h2>
   <p class="muted">Solicitante › Razón social › Destinatario</p>`;
@@ -195,13 +216,13 @@ function consumoHTML(cons, status) {
   if (!cons || cons.tipo === 'nada') return `<p class="muted">Sin facturación registrada.</p>${st ? '<div class="consu"><div class="b"><div class="t">Estado</div><div class="m">' + pill(st.label, st.cls) + '</div></div></div>' : ''}`;
   if (cons.tipo === 'actual') {
     return `<div class="consu">
-      <div class="b" style="border-color:#1f6feb55"><div class="t">Consumo mes corriente</div><div class="m">${fmt(cons.cant)} pzs · ${money(cons.imp)}</div></div>
+      <div class="b" style="border-color:#1f6feb55"><div class="t">Facturación corriente (${mesLabel(store.CURMES)})</div><div class="m">${fmt(cons.cant)} pzs · ${money(cons.imp)}</div></div>
       <div class="b"><div class="t">Estado</div><div class="m">${pill(st.label, st.cls)}</div></div></div>`;
   }
   const u = cons.ultimo, p = cons.penultimo;
   return `<div class="consu">
-    <div class="b" style="border-color:#d2992255"><div class="t">⚠️ Sin facturación en el mes · Último</div><div class="m">${u ? fmt(u.cant) + ' pzs · ' + money(u.imp) : '—'}</div></div>
-    <div class="b"><div class="t">Penúltimo</div><div class="m">${p ? fmt(p.cant) + ' pzs · ' + money(p.imp) : '—'}</div></div>
+    <div class="b" style="border-color:#d2992255"><div class="t">⚠️ Sin factura en el mes · Último: ${u ? mesLabel(u.mes) : '—'}</div><div class="m">${u ? fmt(u.cant) + ' pzs · ' + money(u.imp) : '—'}</div></div>
+    <div class="b"><div class="t">Penúltimo: ${p ? mesLabel(p.mes) : '—'}</div><div class="m">${p ? fmt(p.cant) + ' pzs · ' + money(p.imp) : '—'}</div></div>
     <div class="b"><div class="t">Estado</div><div class="m">${pill(st.label, st.cls)}</div></div></div>`;
 }
 

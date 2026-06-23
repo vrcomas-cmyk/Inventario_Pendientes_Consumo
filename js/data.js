@@ -7,6 +7,17 @@ import { buildRF } from './resumenFac.js';
 import { buildBO } from './sugerencias.js';
 import { openModal, closeModal } from './ui.js';
 
+/* recalcula el rango real de la hoja (algunos exports traen !ref truncado,
+   por eso "se cargan" menos filas de las que tiene el archivo) */
+function fixRange(ws) {
+  const cells = Object.keys(ws).filter(k => k[0] !== '!');
+  if (!cells.length) return;
+  const r = { s: { r: Infinity, c: Infinity }, e: { r: 0, c: 0 } };
+  cells.forEach(k => { const a = XLSX.utils.decode_cell(k); if (a.r < r.s.r) r.s.r = a.r; if (a.c < r.s.c) r.s.c = a.c; if (a.r > r.e.r) r.e.r = a.r; if (a.c > r.e.c) r.e.c = a.c; });
+  ws['!ref'] = XLSX.utils.encode_range(r);
+}
+const sheetRows = ws => { fixRange(ws); return XLSX.utils.sheet_to_json(ws, { defval: '', raw: true }); };
+
 /* detección de rol por firma de encabezados */
 export function roleOf(headers) {
   const H = new Set(headers.map(norm));
@@ -42,7 +53,7 @@ function readFile(f) {
 
 function showSelector(wb) {
   const rowsHtml = wb.SheetNames.map(name => {
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '', raw: true });
+    const rows = sheetRows(wb.Sheets[name]);
     const headers = rows.length ? Object.keys(rows[0]) : [];
     const role = roleOf(headers);
     return `<label class="shrow">
@@ -66,7 +77,7 @@ function loadSelected() {
   store.WB = {}; store.ROLE = {};
   document.querySelectorAll('#sheetSel input:checked').forEach(chk => {
     const name = chk.dataset.name;
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '', raw: true });
+    const rows = sheetRows(wb.Sheets[name]);
     store.WB[name] = rows;
     const role = roleOf(rows.length ? Object.keys(rows[0]) : []);
     if (role && !store.ROLE[role]) store.ROLE[role] = name;

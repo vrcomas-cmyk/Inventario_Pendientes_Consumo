@@ -8,7 +8,7 @@ import { store, RFC } from './store.js';
    destinatario. Devuelve también el mes corriente (máximo presente). */
 export function buildRF(rows) {
   const matDest = new Map(), solic = new Map(), dest = new Map();
-  const solicMats = new Map(), destMats = new Map(), matTexto = new Map();
+  const solicMats = new Map(), destMats = new Map(), matTexto = new Map(), solicRazon = new Map();
   let maxk = 0, maxmes = '';
 
   const add = (map, key, mes, c, i) => {
@@ -33,6 +33,7 @@ export function buildRF(rows) {
     add2(solicMats, s, mat, mes, c, i);
     add2(destMats, d, mat, mes, c, i);
     if (mat && !matTexto.has(mat)) matTexto.set(mat, norm(r[RFC.texto]));
+    if (s && !solicRazon.has(s)) solicRazon.set(s, norm(r[RFC.razon]));
   });
 
   const toSerie = mm => [...mm.entries()]
@@ -44,7 +45,7 @@ export function buildRF(rows) {
   store.CURMES = maxmes;
   return {
     matDest: ser(matDest), solic: ser(solic), dest: ser(dest),
-    solicMats: ser2(solicMats), destMats: ser2(destMats), matTexto, curmes: maxmes,
+    solicMats: ser2(solicMats), destMats: ser2(destMats), matTexto, solicRazon, curmes: maxmes,
   };
 }
 
@@ -64,7 +65,7 @@ export function rankingMaterialesAvg12() {
 export function rankingSolicitantes() {
   if (!store.RF) return [];
   const acc = [];
-  store.RF.solic.forEach((serie, s) => { const sum = serie.reduce((a, x) => a + x.imp, 0); if (sum) acc.push({ code: s, desc: '', val: sum }); });
+  store.RF.solic.forEach((serie, s) => { const sum = serie.reduce((a, x) => a + x.imp, 0); if (sum) acc.push({ code: s, desc: store.RF.solicRazon.get(s) || '', val: sum }); });
   return acc.sort((a, b) => b.val - a.val).slice(0, 10);
 }
 
@@ -166,18 +167,36 @@ export function diasDesdeUltimo(serie) {
      Nueva compra · Reactivación · En aumento · Cayendo · Estable
      Revisar (90-150d) · En riesgo (>150d) · Sin compra +1 año (>365d) · Sin compra
    --------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+   clasificarEstado (definitivo):
+   - Nueva compra : facturó en el TRIMESTRE corriente y NO tenía facturación antes
+                    de ese trimestre (o nunca facturó y hay pedido).
+   - Reactivación : facturó en el trimestre corriente y su última compra previa
+                    fue ANTES del mismo trimestre del año pasado (regresó tras ~1 año).
+   - Si no facturó en el Q corriente -> por días: Revisar (90-150) · En riesgo
+     (>150) · Sin compra +1 año (>365); reciente -> Al corriente.
+   --------------------------------------------------------------------------- */
 export function clasificarEstado(serie, pedido = false) {
   const t = tendencia(serie);
   if (!serie || !serie.length)
     return pedido ? { key: 'nueva', label: 'Nueva compra', cls: 'vio', pct: 0 }
                   : { key: 'nada',  label: 'Sin compra',   cls: 'gris', pct: 0 };
+  const months = serie.map(s => mesKey(s.mes)).filter(Boolean).sort((a, b) => a - b);
+  const [cm, cy] = String(store.CURMES).split('/').map(Number);
+  const qStart = cy * 12 + (Math.floor((cm - 1) / 3) * 3 + 1);   // 1er mes del Q corriente
+  const qEnd = qStart + 2;
+  const yearAgoQStart = qStart - 12;
+  const billedCurQ = months.some(k => k >= qStart && k <= qEnd);
+  const before = months.filter(k => k < qStart);
+
+  if (billedCurQ && before.length === 0) return { key: 'nueva', label: 'Nueva compra', cls: 'vio', pct: t.pct };
+  if (billedCurQ && before.length && Math.max(...before) < yearAgoQStart)
+    return { key: 'reactiva', label: 'Reactivación', cls: 'vio', pct: t.pct };
+
   const dias = diasDesdeUltimo(serie);
-  if (dias > 365)
-    return pedido ? { key: 'reactiva', label: 'Reactivación', cls: 'vio', pct: t.pct, dias }
-                  : { key: 'sinanio',  label: 'Sin compra en más de un año', cls: 'gris', pct: t.pct, dias };
-  if (serie.length === 1 && dias <= 90) return { key: 'nueva', label: 'Nueva compra', cls: 'vio', pct: t.pct, dias };
-  if (dias > 150) return { key: 'riesgo',  label: 'En riesgo', cls: 'rojo', pct: t.pct, dias };
-  if (dias >= 90) return { key: 'revisar', label: 'Revisar',   cls: 'amb',  pct: t.pct, dias };
+  if (dias > 365) return { key: 'sinanio',  label: 'Sin compra en más de un año', cls: 'gris', pct: t.pct, dias };
+  if (dias > 150) return { key: 'riesgo',   label: 'En riesgo', cls: 'rojo', pct: t.pct, dias };
+  if (dias >= 90) return { key: 'revisar',  label: 'Revisar',   cls: 'amb',  pct: t.pct, dias };
   return { key: 'corriente', label: 'Al corriente', cls: 'verde', pct: t.pct, dias };
 }
 

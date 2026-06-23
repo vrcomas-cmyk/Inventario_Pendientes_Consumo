@@ -43,4 +43,5 @@ export const RC = {
   tendencia:'Tendencia', ultMes:'Ultimo mes facturacion', cantUlt:'Cantidad ultima', impUlt:'Importe ultima',
   penFecha:'Penultima_fecha', cantPen:'Cantidad_penultima', impPen:'Importe_penultima',
   precioMin:'precio_min', precioMax:'precio_max', precioProm:'precio_prom',
+  precioUltUni:'Precio_unitario_ultima', precioPenUni:'Precio_unitario_penultima',
 };

@@ -47,14 +47,15 @@ function consumoCells(r) {
 
 /* tabla de consumo para el modal de Inventario (mismas columnas; filas navegables) */
 export function consumoTableHTML(list) {
-  const head = `<tr><th>Cliente</th><th>Material</th><th class="num">Consumo (actual/prom)</th>
+  const head = `<tr><th>Cliente</th><th>Grupo cliente</th><th>Ejecutivo</th><th>Material</th><th class="num">Consumo (actual/prom)</th>
     <th>Última (cant/mes)</th><th class="num">Importe última</th><th class="num">P.U. última</th>
     <th>Penúltima (cant/mes)</th><th class="num">Importe penúlt.</th><th class="num">P.U. penúlt.</th><th>Estado</th><th>Tendencia</th></tr>`;
   const body = list.map((r, i) => `<tr class="click" data-cmi="${i}">
     <td>${esc(r[RC.razon])}<div class="sub">Solic ${esc(r[RC.solic])} · Dest ${esc(r[RC.dest])}</div></td>
+    <td>${esc(grupoCli(r)) || '—'}</td><td>${esc(ejecDe(r)) || '—'}</td>
     <td>${esc(r[RC.material])}<div class="sub">${esc(r[RC.texto])}</div></td>
     ${consumoCells(r)}</tr>`).join('');
-  return `<div class="tbl"><table><thead>${head}</thead><tbody>${body || '<tr><td colspan="11" class="muted" style="padding:14px;text-align:center">Sin facturación de consumo para este material.</td></tr>'}</tbody></table></div>`;
+  return `<div class="tbl"><table><thead>${head}</thead><tbody>${body || '<tr><td colspan="13" class="muted" style="padding:14px;text-align:center">Sin facturación de consumo para este material.</td></tr>'}</tbody></table></div>`;
 }
 export const consumoMaterialRows = material =>
   (store.ROLE.cons ? store.WB[store.ROLE.cons] || [] : []).filter(r => norm(r[RC.material]) === norm(material)).sort((a, b) => mKey(b[RC.ultMes]) - mKey(a[RC.ultMes]));
@@ -180,7 +181,7 @@ function paint(container) {
   const head = [
     th('Cliente (Solic › Razón › Dest)', 'cliente', sort),
     th('Grupo cliente', 'grupocli', sort), th('Ejecutivo', 'ejecutivo', sort),
-    th('Material', 'material', sort), th('Sector', 'sector', sort), th('Grupo art.', 'grupoart', sort),
+    th('Material', 'material', sort), th('Sector / Grupo art.', 'sector', sort),
     th('Consumo (actual/prom)', 'consumoAct', sort, 'num'),
     th('Última (cant/mes)', 'ultMes', sort), th('Importe última', 'impUlt', sort, 'num'), th('P.U. última', 'precioUltUni', sort, 'num'),
     th('Penúltima (cant/mes)', 'penFecha', sort), th('Importe penúlt.', 'impPen', sort, 'num'), th('P.U. penúlt.', 'precioPenUni', sort, 'num'),
@@ -194,7 +195,7 @@ function paint(container) {
           <span class="lnk" data-ev="dest" data-key="${esc(r[RC.dest])}">Dest ${esc(r[RC.dest])}</span></div></td>
       <td>${esc(grupoCli(r)) || '—'}</td><td>${esc(ejecDe(r)) || '—'}</td>
       <td><span class="lnk" data-ev="mat">${esc(r[RC.material])}</span><div class="sub">${esc(r[RC.texto])}</div></td>
-      <td>${esc(sectorDe(r)) || '—'}</td><td>${esc(grupoArt(r)) || '—'}</td>
+      <td>${esc(sectorDe(r)) || '—'}<div class="sub">${esc(grupoArt(r)) || ''}</div></td>
       ${consumoCells(r)}
     </tr>`).join('');
 
@@ -220,7 +221,7 @@ function paint(container) {
     <div class="tablecard">
       <h3>📊 Reporte de Consumo <span class="hint">clic encabezado = ordenar (Shift = varias) · Solic/Dest/Material = facturación</span></h3>
       <div class="tbl"><table><thead><tr>${head}</tr></thead>
-        <tbody>${body || '<tr><td colspan="15" class="muted" style="padding:20px;text-align:center">Sin resultados</td></tr>'}</tbody></table></div>
+        <tbody>${body || '<tr><td colspan="14" class="muted" style="padding:20px;text-align:center">Sin resultados</td></tr>'}</tbody></table></div>
       <div class="pager">
         <button class="btn" data-pg="0" ${page === 0 ? 'disabled' : ''}>« Inicio</button>
         <button class="btn" data-pg="${page - 1}" ${page === 0 ? 'disabled' : ''}>‹ Anterior</button>

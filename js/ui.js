@@ -56,18 +56,30 @@ export function trendText(t) {
 
 /* comparativa mes vs año anterior + Q vs año anterior */
 export function comparativaHTML(cmp) {
+  const pct = (a, b) => b > 0 ? (a - b) / b * 100 : (a > 0 ? 100 : 0);
   const pctTxt = p => `<span class="tnd ${p > 1 ? 'up' : p < -1 ? 'down' : 'flat'}">${p > 0 ? '+' : ''}${p.toFixed(0)}%</span>`;
-  return `<div class="consu">
-    <div class="b"><div class="t">${esc(cmp.mesActLbl)} (mes actual)</div><div class="m">${money(cmp.mesAct.imp)}</div><div class="muted" style="font-size:11px">${fmt(cmp.mesAct.cant)} pzs</div></div>
-    <div class="b"><div class="t">${esc(cmp.mesAntLbl)} (año anterior)</div><div class="m">${money(cmp.mesAnt.imp)}</div><div class="muted" style="font-size:11px">${fmt(cmp.mesAnt.cant)} pzs</div></div>
-    <div class="b"><div class="t">Variación mes</div><div class="m">${pctTxt(cmp.mesPct)}</div></div>
-  </div>
-  <div class="consu" style="margin-top:8px">
-    <div class="b"><div class="t">Q${cmp.q} ${cmp.cy} (actual)</div><div class="m">${money(cmp.qAct.imp)}</div><div class="muted" style="font-size:11px">${fmt(cmp.qAct.cant)} pzs</div></div>
-    <div class="b"><div class="t">Q${cmp.q} ${cmp.cy - 1} (año anterior)</div><div class="m">${money(cmp.qAnt.imp)}</div><div class="muted" style="font-size:11px">${fmt(cmp.qAnt.cant)} pzs</div></div>
-    <div class="b"><div class="t">Variación Q</div><div class="m">${pctTxt(cmp.qPct)}</div></div>
+  const box = (t, imp, cant) => `<div class="b"><div class="t">${t}</div><div class="m"><span class="cu cu-imp">${money(imp)}</span><span class="cu cu-pz" style="display:none">${fmt(cant)} pzs</span></div></div>`;
+  const vbox = (t, pi, pc) => `<div class="b"><div class="t">${t}</div><div class="m"><span class="cu cu-imp">${pctTxt(pi)}</span><span class="cu cu-pz" style="display:none">${pctTxt(pc)}</span></div></div>`;
+  return `<div class="cmpcard">
+    <div class="cmptoggle"><button class="seg on" onclick="__cmpMode(this,'imp')">💵 Importe</button><button class="seg" onclick="__cmpMode(this,'pz')">📦 Piezas</button></div>
+    <div class="consu">
+      ${box(esc(cmp.mesActLbl) + ' (mes actual)', cmp.mesAct.imp, cmp.mesAct.cant)}
+      ${box(esc(cmp.mesAntLbl) + ' (año anterior)', cmp.mesAnt.imp, cmp.mesAnt.cant)}
+      ${vbox('Variación mes', cmp.mesPct, pct(cmp.mesAct.cant, cmp.mesAnt.cant))}
+    </div>
+    <div class="consu" style="margin-top:8px">
+      ${box('Q' + cmp.q + ' ' + cmp.cy + ' (actual)', cmp.qAct.imp, cmp.qAct.cant)}
+      ${box('Q' + cmp.q + ' ' + (cmp.cy - 1) + ' (año anterior)', cmp.qAnt.imp, cmp.qAnt.cant)}
+      ${vbox('Variación Q', cmp.qPct, pct(cmp.qAct.cant, cmp.qAnt.cant))}
+    </div>
   </div>`;
 }
+window.__cmpMode = (btn, mode) => {
+  const card = btn.closest('.cmpcard'); if (!card) return;
+  card.querySelectorAll('.cmptoggle .seg').forEach(b => b.classList.remove('on')); btn.classList.add('on');
+  card.querySelectorAll('.cu-imp').forEach(e => e.style.display = mode === 'imp' ? '' : 'none');
+  card.querySelectorAll('.cu-pz').forEach(e => e.style.display = mode === 'pz' ? '' : 'none');
+};
 
 /* tabla de materiales facturados a un solic/dest, con su tendencia */
 export function materialesTablaHTML(mats) {

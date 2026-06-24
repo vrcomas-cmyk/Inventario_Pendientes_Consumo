@@ -171,3 +171,7 @@ th.sortable:hover{color:var(--tx)}
 .vig.rojo{background:#3a0f0f;color:#ff7b72}
 .vig.amb{background:#332b0c;color:#e3b341}
 .vig.verde{background:#0f2a16;color:#56d364}
+
+.cmptoggle{display:inline-flex;border:1px solid var(--bd);border-radius:10px;overflow:hidden;margin-bottom:10px}
+.cmptoggle .seg{background:var(--panel2);color:var(--mut);border:none;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600}
+.cmptoggle .seg.on{background:var(--acc);color:#04140a}

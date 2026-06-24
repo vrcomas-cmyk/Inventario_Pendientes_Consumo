@@ -205,17 +205,21 @@ const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto'
 
 /* rellena los meses sin compra con 0 desde el primer mes hasta el mes corriente
    (para que la gráfica llegue completa hasta hoy) */
-export function completarSerie(serie) {
-  if (!serie || !serie.length) return serie || [];
-  const byMes = new Map(serie.map(s => [s.mes, s]));
-  let [mm, yy] = String(serie[0].mes).split('/').map(Number);
-  const endK = Math.max(mesKey(serie[serie.length - 1].mes), mesKey(store.CURMES));
-  const out = []; let guard = 0;
-  while (guard++ < 600) {
+export function completarSerie(serie, range) {
+  const byMes = new Map((serie || []).map(s => [s.mes, s]));
+  let loK, hiK;
+  if (range) { [loK, hiK] = range; }
+  else {
+    if (!serie || !serie.length) return serie || [];
+    loK = mesKey(serie[0].mes); hiK = Math.max(mesKey(serie[serie.length - 1].mes), mesKey(store.CURMES));
+  }
+  if (!loK || !hiK || loK > hiK) return [];
+  const out = []; let k = loK, guard = 0;
+  while (k <= hiK && guard++ < 600) {
+    const yy = Math.floor((k - 1) / 12), mm = ((k - 1) % 12) + 1;
     const mes = String(mm).padStart(2, '0') + '/' + yy;
     out.push(byMes.get(mes) || { mes, cant: 0, imp: 0 });
-    if (yy * 12 + mm >= endK) break;
-    mm++; if (mm > 12) { mm = 1; yy++; }
+    k++;
   }
   return out;
 }

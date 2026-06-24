@@ -3,10 +3,12 @@
    Búsqueda con refresco ligero (admite espacios). 2x2 + ranking, filtros
    Condición/Grupo/Sector + multi-filtro, zoom, admin (ocultar filas), drills.
    =========================================================================== */
-import { norm, num, fmt, money, esc } from './utils.js';
+import { norm, num, fmt, money, esc, vigencia } from './utils.js';
 import { store, C, RC } from './store.js';
 import { serieMatDest, tendenciaTexto, mesLabel, aMesAnio } from './resumenFac.js';
-import { openModal, pill, trendText, rankingHTML } from './ui.js';
+import { openModal, pill, trendText, rankingHTML, navOpen, navPush, backBtn } from './ui.js';
+import { consumoTableHTML, consumoMaterialRows, openConsumoMaterial } from './consumo.js';
+import { openDetalle } from './sugerencias.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
 import { makeSort, cycleSort, applySort, th } from './sort.js';
@@ -108,13 +110,17 @@ export function renderInventario(container) {
                 ${F.grupo ? sel('grupo', flt.grupo, distinct(F.grupo), 'Grupo (todos)') : ''}
                 ${F.sector ? sel('sector', flt.sector, distinct(F.sector), 'Sector (todos)') : ''}`;
   const adminBtn = `<button class="btn ${isAdmin ? 'primary' : ''}" data-admin>${isAdmin ? '🔓 Admin ON' : '🔒 Admin'}</button>`;
-  const expBtn = `<button class="btn" data-exp>⬇️ Excel</button>`;
+  const expBtn = `<button class="btn" data-exp>⬇️ Excel</button><button class="btn" data-clearall>🧹 Limpiar todo</button>`;
 
   container.innerHTML = `${toolbarHTML(cols(), flt, `${cats}${zoomHTML('inv')}${expBtn}${adminBtn}`)}<div class="result"></div>`;
   wireToolbar(container, flt, () => renderInventario(container), () => paint(container), makeSuggest(CONS || [], cols()));
   container.querySelectorAll('[data-cat]').forEach(s => s.onchange = e => { flt[e.target.dataset.cat] = e.target.value; paint(container); });
   container.querySelector('[data-admin]').onclick = () => { admin.setOn(!isAdmin); renderInventario(container); };
   container.querySelector('[data-exp]').onclick = () => exportInv();
+  container.querySelector('[data-clearall]').onclick = () => {
+    flt.q = ''; flt.list = []; flt.cond = ''; flt.grupo = ''; flt.sector = '';
+    sort = makeSort(); renderInventario(container);
+  };
   paint(container);
 }
 
@@ -195,7 +201,7 @@ function paint(container) {
   }));
   container.querySelectorAll('.result [data-hk]').forEach(x => x.onclick = () => { admin.toggle(x.dataset.hk); paint(container); });
   container.querySelectorAll('.result [data-mat]').forEach(el => el.addEventListener('click', () =>
-    showLotes(el.dataset.mat, el.dataset.cen || null, el.dataset.alm || null)));
+    navOpen(() => showLotes(el.dataset.mat, el.dataset.cen || null, el.dataset.alm || null))));
 }
 
 /* ---- API para otras vistas (Sugerencias) ---- */
@@ -226,10 +232,10 @@ function showLotes(material, centro, almacen) {
   const total = lotes.reduce((s, r) => s + num(r.CantidadDisp), 0);
   const body = lotes.map(r => ({ r, d: diasCad(r.FechaCaducidad) }))
     .sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9))
-    .map(({ r, d }) => `<tr>
-      <td>${esc(r.Centro)}</td><td>${esc(r['Almacén'])}</td><td>${esc(r.Lote)}</td><td>${esc(r.FechaCaducidad)}</td>
+    .map(({ r, d }) => { const vg = vigencia(r.FechaCaducidad); return `<tr>
+      <td>${esc(r.Centro)}</td><td>${esc(r['Almacén'])}</td><td>${esc(r.Lote)}</td><td>${esc(r.FechaCaducidad) || '—'}${vg ? `<div class="vig ${vg.cls}">${vg.txt}</div>` : ''}</td>
       <td class="num"><span class="tnd ${d != null && d <= INV_CFG.expiry.mes1 ? 'down' : ''}">${d == null ? '—' : d}</span></td>
-      <td>${pill(estadoCad(d), cadCls(d))}</td><td class="num">${fmt(r.CantidadDisp)}</td></tr>`).join('');
+      <td>${pill(estadoCad(d), cadCls(d))}</td><td class="num">${fmt(r.CantidadDisp)}</td></tr>`; }).join('');
   // Sugerencias (BO) que tienen este material
   const sug = (store.BO || []).filter(it => norm(it.bo[C.matBase]) === norm(material));
   const sugBody = sug.map((it, i) => { const b = it.bo, bl = norm(b[C.bloq]);
@@ -246,40 +252,25 @@ function showLotes(material, centro, almacen) {
       <tbody>${sugBody || '<tr><td colspan="8" class="muted" style="padding:14px;text-align:center">Sin sugerencias para este material.</td></tr>'}</tbody>
     </table></div>`;
 
-  // Consumo: clientes que han facturado este material
-  const consRows = (store.ROLE.cons ? store.WB[store.ROLE.cons] || [] : [])
-    .filter(r => norm(r[RC.material]) === norm(material))
-    .sort((a, b) => mesKeyC(b[RC.ultMes]) - mesKeyC(a[RC.ultMes]));
-  const consBody = consRows.map(r => {
-    const tnd = tendenciaTexto(serieMatDest(r[RC.dest], r[RC.material]));
-    return `<tr>
-      <td>${esc(r[RC.razon])}<div class="sub">Solic ${esc(r[RC.solic])} · Dest ${esc(r[RC.dest])}</div></td>
-      <td>${esc(mLblC(r[RC.ultMes]))}</td>
-      <td class="num">${fmt(r[RC.cantUlt])}</td><td class="num">${money(r[RC.impUlt])}</td>
-      <td class="num">${money(r[RC.precioUltUni])}</td>
-      <td class="num">${fmt(r[RC.promedio])}</td><td class="num">${fmt(r[RC.consumoAct])}</td>
-      <td>${trendText(tnd)}</td></tr>`;
-  }).join('');
-  const consTable = `<div class="tbl"><table>
-      <thead><tr><th>Cliente</th><th>Última vez</th><th class="num">Cant. última</th><th class="num">Importe última</th><th class="num">P.U. última</th><th class="num">Consumo prom.</th><th class="num">Consumo actual</th><th>Tendencia</th></tr></thead>
-      <tbody>${consBody || '<tr><td colspan="8" class="muted" style="padding:14px;text-align:center">Sin facturación de consumo para este material.</td></tr>'}</tbody>
-    </table></div>`;
+  // Consumo: clientes que han facturado este material (mismas columnas que Consumo)
+  const consRows = consumoMaterialRows(material);
+  const consTable = consumoTableHTML(consRows);
 
   const seg = `<div class="segm" style="margin-top:14px">
     <button class="seg on" data-view="sug">📋 Sugerencias (${sug.length})</button>
     <button class="seg" data-view="cons">📊 Consumo (${consRows.length})</button></div>`;
 
   openModal(`
-    <button class="x" onclick="closeModal()">×</button>
+    ${backBtn()}<button class="x" onclick="closeModal()">×</button>
     <h2>${titulo}</h2>
     <p class="muted">${lotes.length} lote(s) · ${fmt(total)} unidades · rojo ≤${INV_CFG.expiry.mes1}d · ámbar ≤${INV_CFG.expiry.mes6}d</p>
     <div class="tablecard"><div class="tbl">
-      <table><thead><tr><th>Centro</th><th>Almacén</th><th>Lote</th><th>Caducidad</th><th class="num">Días</th><th>Estado</th><th class="num">Cantidad</th></tr></thead>
+      <table><thead><tr><th>Centro</th><th>Almacén</th><th>Lote</th><th>Caducidad / vigencia</th><th class="num">Días</th><th>Estado</th><th class="num">Cantidad</th></tr></thead>
       <tbody>${body || '<tr><td colspan="7" class="muted" style="padding:16px;text-align:center">Sin lotes.</td></tr>'}</tbody></table>
     </div></div>
     ${seg}
-    <div class="tablecard" data-pane="sug"><h3>📋 Sugerencias con este material <span class="hint">clic en una fila para ver el detalle</span></h3>${sugTable}</div>
-    <div class="tablecard" data-pane="cons" style="display:none"><h3>📊 Clientes que han facturado este material</h3>${consTable}</div>`);
+    <div class="tablecard" data-pane="sug"><h3>📋 Sugerencias con este material <span class="hint">clic en una fila para ver el detalle</span></h3><input class="mff" data-mf placeholder="🔎 filtrar…">${sugTable}</div>
+    <div class="tablecard" data-pane="cons" style="display:none"><h3>📊 Clientes que han facturado este material <span class="hint">clic en una fila para ver el detalle</span></h3><input class="mff" data-mf placeholder="🔎 filtrar…">${consTable}</div>`);
 
   const panes = { sug: document.querySelector('#modal [data-pane="sug"]'), cons: document.querySelector('#modal [data-pane="cons"]') };
   document.querySelectorAll('#modal .seg').forEach(btn => btn.addEventListener('click', () => {
@@ -289,9 +280,6 @@ function showLotes(material, centro, almacen) {
     panes.sug.style.display = v === 'sug' ? '' : 'none';
     panes.cons.style.display = v === 'cons' ? '' : 'none';
   }));
-  document.querySelectorAll('#modal tr[data-si]').forEach(tr => tr.addEventListener('click', () => {
-    import('./sugerencias.js').then(m => m.openDetalle(sug[+tr.dataset.si]));
-  }));
+  document.querySelectorAll('#modal tr[data-si]').forEach(tr => tr.addEventListener('click', () => navPush(() => openDetalle(sug[+tr.dataset.si]))));
+  document.querySelectorAll('#modal tr[data-cmi]').forEach(tr => tr.addEventListener('click', () => openConsumoMaterial(consRows[+tr.dataset.cmi])));
 }
-const mLblC = v => { const m = aMesAnio(v); return m ? mesLabel(m) : norm(v); };
-const mesKeyC = v => { const m = aMesAnio(v); if (!m) return 0; const [mm, yy] = m.split('/').map(Number); return yy * 12 + mm; };

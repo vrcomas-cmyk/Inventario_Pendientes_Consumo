@@ -1,17 +1,19 @@
 /* ===========================================================================
    sugerencias.js · "Todas las Sugerencias" (BO) — v4
    =========================================================================== */
-import { norm, num, fmt, money, esc } from './utils.js';
+import { norm, num, fmt, money, esc, vigencia } from './utils.js';
 import { store, C } from './store.js';
 import { serieMatDest, serieSolic, serieDest, consumoDe, clasificarEstado,
-         tendenciaTexto, comparativa, materialesDe, mesLabel } from './resumenFac.js';
+         tendenciaTexto, comparativa, materialesDe, mesLabel, aMesAnio } from './resumenFac.js';
 import { ESTADOS } from './resumenFac.js';
 import { openModal, drawSerie, pill, trendText, invGrid, rankingHTML,
-         comparativaHTML, materialesTablaHTML } from './ui.js';
-import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest } from './filters.js';
+         comparativaHTML, materialesTablaHTML, backBtn, navOpen, navPush } from './ui.js';
+import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest, periodoControlHTML, wirePeriodo, dateRange, inRangeDay } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
 import { makeSort, cycleSort, applySort, th } from './sort.js';
 import { exportXlsx, stamp } from './exportx.js';
+
+const mKey = v => { const m = aMesAnio(v); if (!m) return 0; const [mm, yy] = m.split('/').map(Number); return yy * 12 + mm; };
 import { grupoCliente, ejecutivoNombre, matSector, matGrupo, loadEnrich, enrichTs, normCode } from './enrich.js';
 import { precioInv } from './inventario.js';
 
@@ -46,7 +48,7 @@ export function buildBO(rows) {
 }
 
 const flt = makeFilters();
-flt.estado = ''; flt.fuente = '';
+flt.estado = ''; flt.fuente = ''; flt.periodo = ''; flt.desde = ''; flt.hasta = '';
 let sort = makeSort();
 const ESTRANK = { nueva: 7, corriente: 6, reactiva: 5, revisar: 4, riesgo: 3, sinanio: 2, nada: 1 };
 const SORTV = {
@@ -76,10 +78,12 @@ const cols = () => [
 ];
 function filtered() {
   const Cc = cols();
+  const pr = dateRange(flt.desde, flt.hasta);
   return store.BO.filter(it => {
     if (flt.estado && it.status.key !== flt.estado) return false;
     if (flt.fuente === 'si' && !it.fuentes.length) return false;
     if (flt.fuente === 'no' && it.fuentes.length) return false;
+    if (pr && !inRangeDay(it.bo[C.fecha], pr)) return false;
     return passes(it, Cc, flt);
   });
 }
@@ -95,12 +99,17 @@ export function renderSug(container) {
   const fueSel = `<select data-fue><option value="">Fuentes</option><option value="si" ${flt.fuente === 'si' ? 'selected' : ''}>Con fuentes</option><option value="no" ${flt.fuente === 'no' ? 'selected' : ''}>Sin fuentes</option></select>`;
   const ts = enrichTs();
   const updBtn = `<button class="btn" data-upd title="${ts ? 'Última actualización: ' + new Date(ts).toLocaleString('es-MX') : 'Sin descargar aún'}">🔄 Actualizar Ejecutivos/Materiales</button>`;
-  const expBtn = `<button class="btn" data-exp>⬇️ Excel</button>`;
-  container.innerHTML = `${toolbarHTML(cols(), flt, `${estSel}${fueSel}${zoomHTML('sug')}${expBtn}${updBtn}`)}<div class="result"></div>`;
+  const expBtn = `<button class="btn" data-exp>⬇️ Excel</button><button class="btn" data-clearall>🧹 Limpiar todo</button>`;
+  container.innerHTML = `${toolbarHTML(cols(), flt, `${estSel}${fueSel}${periodoControlHTML(flt)}${zoomHTML('sug')}${expBtn}${updBtn}`)}<div class="result"></div>`;
   wireToolbar(container, flt, () => renderSug(container), () => paint(container), makeSuggest(store.BO, cols()));
   container.querySelector('[data-est]').onchange = e => { flt.estado = e.target.value; paint(container); };
   container.querySelector('[data-fue]').onchange = e => { flt.fuente = e.target.value; paint(container); };
+  wirePeriodo(container, flt, store.CURMES, () => renderSug(container));
   container.querySelector('[data-exp]').onclick = () => exportSug();
+  container.querySelector('[data-clearall]').onclick = () => {
+    flt.q = ''; flt.list = []; flt.estado = ''; flt.fuente = ''; flt.periodo = ''; flt.desde = ''; flt.hasta = '';
+    sort = makeSort(); renderSug(container);
+  };
   container.querySelector('[data-upd]').onclick = ev => { ev.target.textContent = '⏳ Actualizando…'; loadEnrich(true).then(() => renderSug(container)); };
   paint(container);
 }
@@ -181,12 +190,12 @@ function paint(container) {
   container.querySelectorAll('.result [data-ev]').forEach(el => el.addEventListener('click', ev => {
     ev.stopPropagation();
     const kind = el.dataset.ev, l2 = filtered();
-    if (kind === 'det') openDetalle(l2[+el.dataset.i]);
-    else if (kind === 'ped') openPedido(el.dataset.k);
-    else if (kind === 'solic') openEvol('solic', el.dataset.k);
-    else if (kind === 'dest') openEvol('dest', el.dataset.k);
+    if (kind === 'det') navOpen(() => openDetalle(l2[+el.dataset.i]));
+    else if (kind === 'ped') navOpen(() => openPedido(el.dataset.k));
+    else if (kind === 'solic') navOpen(() => openEvol('solic', el.dataset.k));
+    else if (kind === 'dest') navOpen(() => openEvol('dest', el.dataset.k));
   }));
-  container.querySelectorAll('.result tr.click').forEach(tr => tr.addEventListener('click', () => openDetalle(filtered()[+tr.dataset.i])));
+  container.querySelectorAll('.result tr.click').forEach(tr => tr.addEventListener('click', () => navOpen(() => openDetalle(filtered()[+tr.dataset.i]))));
 }
 
 function exportSug() {
@@ -243,7 +252,7 @@ export function openPedido(pedido) {
       <td>${pill(it.status.label, it.status.cls)}</td><td>${trendText(it.tend)}</td></tr>`;
   }).join('');
   openModal(`
-    <button class="x" onclick="closeModal()">×</button>
+    ${backBtn()}<button class="x" onclick="closeModal()">×</button>
     <h2>Pedido ${esc(pedido)}</h2>
     <p class="muted">${esc(b0[C.razon])} · OC ${esc(b0[C.oc]) || '—'} · ${items.length} material(es)</p>
     <div class="mkpis">
@@ -252,9 +261,10 @@ export function openPedido(pedido) {
       <div class="stat"><div class="l">Importe pendiente</div><div class="v" style="font-size:16px">${money(impTot)}</div></div>
     </div>
     <div class="tablecard"><h3>Materiales del pedido <span class="hint">clic en una fila para ver el detalle del material</span></h3>
+      <input class="mff" data-mf placeholder="🔎 filtrar materiales…">
       <div class="tbl"><table><thead><tr><th>Material</th><th>Descripción</th><th class="num">Cant. ped.</th><th class="num">Pendiente</th><th class="num">Precio</th><th class="num">Fuentes</th><th>Bloqueado</th><th>Estado</th><th>Tendencia</th></tr></thead>
       <tbody>${rows}</tbody></table></div></div>`);
-  document.querySelectorAll('#modal tr.click').forEach(tr => tr.addEventListener('click', () => openDetalle(items[+tr.dataset.pi], pedido)));
+  document.querySelectorAll('#modal tr.click').forEach(tr => tr.addEventListener('click', () => navPush(() => openDetalle(items[+tr.dataset.pi]))));
 }
 
 export function openDetalle(it, fromPedido) {
@@ -266,18 +276,18 @@ export function openDetalle(it, fromPedido) {
   const transito = [['Tránsito 1030', b[C.tr1030]], ['Tránsito 1031', b[C.tr1031]], ['Tránsito 1032', b[C.tr1032]], ['Tránsito total', b[C.transito]]].filter(([, v]) => num(v) > 0);
 
   const fz = it.fuentes.length
-    ? `<div class="tbl"><table><thead><tr><th>Fuente</th><th>Material sug.</th><th>Descripción</th><th>Centro/Alm</th><th class="num">Disponible</th><th class="num">Precio inv.</th><th>Lote</th><th>Caducidad</th></tr></thead><tbody>${
+    ? `<div class="tbl"><table><thead><tr><th>Fuente</th><th>Material sug.</th><th>Descripción</th><th>Centro/Alm</th><th class="num">Disponible</th><th class="num">Precio inv.</th><th>Lote</th><th>Caducidad / vigencia</th></tr></thead><tbody>${
         it.fuentes.map(f => {
           const pInv = precioInv(f[C.matSug], f[C.fuente]);
-          return `<tr><td>${pill(norm(f[C.fuente]), /[Cc]orta/.test(norm(f[C.fuente])) ? 'rojo' : 'azul')}</td><td>${esc(f[C.matSug])}</td><td>${esc(f[C.descSug])}</td><td>${esc(f[C.cenSug])}${norm(f[C.almSug]) ? ' / ' + esc(f[C.almSug]) : ''}</td><td class="num">${fmt(f[C.disp])}</td><td class="num">${pInv != null ? money(pInv) : '—'}</td><td>${esc(f[C.lote])}</td><td>${esc(f[C.cad])}</td></tr>`;
+          const vg = vigencia(f[C.cad]);
+          return `<tr><td>${pill(norm(f[C.fuente]), /[Cc]orta/.test(norm(f[C.fuente])) ? 'rojo' : 'azul')}</td><td>${esc(f[C.matSug])}</td><td>${esc(f[C.descSug])}</td><td>${esc(f[C.cenSug])}${norm(f[C.almSug]) ? ' / ' + esc(f[C.almSug]) : ''}</td><td class="num">${fmt(f[C.disp])}</td><td class="num">${pInv != null ? money(pInv) : '—'}</td><td>${esc(f[C.lote])}</td><td>${esc(f[C.cad]) || '—'}${vg ? `<div class="vig ${vg.cls}">${vg.txt}</div>` : ''}</td></tr>`;
         }).join('')
       }</tbody></table></div>`
     : '<p class="muted">Este BO no tiene fuentes asociadas.</p>';
 
   const bl = bloqDe(b);
   openModal(`
-    <button class="x" onclick="closeModal()">×</button>
-    ${fromPedido ? `<button class="btn" style="float:left;margin-right:10px" onclick="window.__volverPedido()">← Pedido ${esc(fromPedido)}</button>` : ''}
+    ${backBtn()}<button class="x" onclick="closeModal()">×</button>
     ${cabecera(b)}
     <p class="muted">Pedido ${esc(b[C.pedido])} · OC ${esc(b[C.oc]) || '—'} · Material ${esc(b[C.matBase])} — ${esc(b[C.descSol])} ${bl ? '· <span class="pill amb">' + esc(bl) + '</span>' : ''}</p>
     <div class="mkpis">
@@ -290,27 +300,25 @@ export function openDetalle(it, fromPedido) {
     <div class="card"><h3>💵 Consumo / facturación</h3>${consumoHTML(it.cons, it.status)}</div>
     ${store.RF ? `<div class="card"><h3>📊 Comparativo anual</h3>${comparativaHTML(comparativa(it.serie))}</div>` : ''}
     <div class="card"><h3>📈 Evolución mensual — material + destinatario</h3><div class="chartbox"><canvas id="cD"></canvas></div></div>
-    <div class="card"><h3>🔀 Fuentes / materiales ofertables (${it.fuentes.length})</h3>${fz}</div>
+    <div class="card"><h3>🔀 Fuentes / materiales ofertables (${it.fuentes.length})</h3><input class="mff" data-mf placeholder="🔎 filtrar fuentes…">${fz}</div>
     <div class="card"><h3>📦 Inventario principales</h3>${invGrid(invPrincipales)}
       <h3 style="margin-top:12px">🏬 Otros centros (1001–1036)</h3>${invGrid(invOtros)}
       <h3 style="margin-top:12px">🔁 Disponible entre almacenes</h3>${invGrid(dispo)}
       <h3 style="margin-top:12px">🚚 Material en curso (tránsito) por almacén</h3>${transito.length ? invGrid(transito) : '<p class="muted">Sin material en tránsito.</p>'}</div>
   `);
-  if (fromPedido) window.__volverPedido = () => openPedido(fromPedido);
   drawSerie('cD', it.serie, '');
 }
-
 export function openEvol(kind, key) {
   if (!store.RF) { alert('No hay Resumen_Fac cargado.'); return; }
   const serie = kind === 'solic' ? serieSolic(key) : serieDest(key);
   const titulo = kind === 'solic' ? 'Facturación general del Solicitante' : 'Facturación general del Destinatario';
   const mats = materialesDe(kind, key);
   openModal(`
-    <button class="x" onclick="closeModal()">×</button>
+    ${backBtn()}<button class="x" onclick="closeModal()">×</button>
     <h2>${titulo}</h2>
     <p class="muted">${kind === 'solic' ? 'Solicitante' : 'Destinatario'}: ${esc(key)} · ${mats.length} material(es) facturado(s)</p>
     <div class="card"><h3>📊 Comparativo anual</h3>${comparativaHTML(comparativa(serie))}</div>
     <div class="card"><h3>📈 Evolución mensual — Importe facturado</h3><div class="chartbox"><canvas id="cG"></canvas></div></div>
-    <div class="card"><h3>🧾 Códigos facturados y su tendencia</h3>${materialesTablaHTML(mats)}</div>`);
+    <div class="card"><h3>🧾 Códigos facturados y su tendencia</h3><input class="mff" data-mf placeholder="🔎 filtrar códigos…">${materialesTablaHTML(mats)}</div>`);
   drawSerie('cG', serie, titulo);
 }

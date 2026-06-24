@@ -31,3 +31,25 @@ export function tokenMatch(text, query) {
 
 /* construye el texto-base de una fila a partir de varias columnas */
 export const rowText = (row, cols) => cols.map(c => norm(row[c])).join(' ');
+
+/* parsea una fecha (dd/mm/aaaa, mm/aaaa, yyyy-mm-dd) -> Date | null */
+export function parseFecha(v) {
+  const s = norm(v); if (!s) return null;
+  let m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(s); if (m) { let y = +m[3]; if (y < 100) y += 2000; return new Date(y, +m[2] - 1, +m[1]); }
+  m = /^(\d{1,2})\/(\d{4})$/.exec(s); if (m) return new Date(+m[2], +m[1] - 1, 1);
+  m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s); if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  const d = new Date(s); return isNaN(d) ? null : d;
+}
+/* vigencia restante hasta una caducidad: {dias, meses, txt, cls} */
+export function vigencia(fecha) {
+  const exp = parseFecha(fecha); if (!exp) return null;
+  const now = new Date(); now.setHours(0, 0, 0, 0); exp.setHours(0, 0, 0, 0);
+  const dias = Math.round((exp - now) / 86400000);
+  const meses = dias / 30.44;
+  let txt, cls;
+  if (dias < 0) { txt = 'Vencido'; cls = 'rojo'; }
+  else if (dias <= 31) { txt = `${dias} d`; cls = 'rojo'; }
+  else if (dias <= 182) { txt = `${meses.toFixed(1)} meses`; cls = 'amb'; }
+  else { txt = `${meses.toFixed(1)} meses`; cls = 'verde'; }
+  return { dias, meses, txt, cls };
+}

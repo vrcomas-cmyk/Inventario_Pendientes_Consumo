@@ -6,6 +6,7 @@ import { store } from './store.js';
 import { buildRF } from './resumenFac.js';
 import { buildBO } from './sugerencias.js';
 import { openModal, closeModal } from './ui.js';
+import { kvSet, kvGet, kvDel } from './persist.js';
 
 /* recalcula el rango real de la hoja (algunos exports traen !ref truncado,
    por eso "se cargan" menos filas de las que tiene el archivo) */
@@ -45,7 +46,7 @@ function readFile(f) {
   const r = new FileReader();
   r.onload = e => {
     const wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
-    PENDING = { name: f.name, wb };
+    PENDING = { name: f.name, wb, buf: e.target.result };
     showSelector(wb);
   };
   r.readAsArrayBuffer(f);
@@ -75,8 +76,9 @@ function showSelector(wb) {
 function loadSelected() {
   const wb = PENDING.wb;
   store.WB = {}; store.ROLE = {};
+  const selected = [];
   document.querySelectorAll('#sheetSel input:checked').forEach(chk => {
-    const name = chk.dataset.name;
+    const name = chk.dataset.name; selected.push(name);
     const rows = sheetRows(wb.Sheets[name]);
     store.WB[name] = rows;
     const role = roleOf(rows.length ? Object.keys(rows[0]) : []);
@@ -85,6 +87,32 @@ function loadSelected() {
   store.fileName = PENDING.name;
   store.RF = store.ROLE.fac ? buildRF(store.WB[store.ROLE.fac]) : null;
   store.BO = store.ROLE.sug ? buildBO(store.WB[store.ROLE.sug]) : [];
+  // guardar para próximas sesiones (no bloquea la UI)
+  if (PENDING.buf) kvSet('file', { name: PENDING.name, selected, buf: PENDING.buf }).catch(() => {});
   closeModal();
   onReadyCb();
 }
+
+/* reconstruye el último archivo guardado (al iniciar) */
+export async function restoreSaved() {
+  let rec; try { rec = await kvGet('file'); } catch (e) { return false; }
+  if (!rec || !rec.buf) return false;
+  const wb = XLSX.read(rec.buf, { type: 'array', cellDates: false });
+  store.WB = {}; store.ROLE = {};
+  (rec.selected || wb.SheetNames).forEach(name => {
+    if (!wb.Sheets[name]) return;
+    const rows = sheetRows(wb.Sheets[name]);
+    store.WB[name] = rows;
+    const role = roleOf(rows.length ? Object.keys(rows[0]) : []);
+    if (role && !store.ROLE[role]) store.ROLE[role] = name;
+  });
+  store.fileName = rec.name;
+  store.RF = store.ROLE.fac ? buildRF(store.WB[store.ROLE.fac]) : null;
+  store.BO = store.ROLE.sug ? buildBO(store.WB[store.ROLE.sug]) : [];
+  return true;
+}
+export async function forgetSaved() {
+  try { await kvDel('file'); } catch (e) {}
+  store.WB = {}; store.ROLE = {}; store.RF = null; store.BO = []; store.fileName = '';
+}
+export const savedFileName = () => store.fileName || '';

@@ -6,16 +6,36 @@ import { mesLabel, completarSerie } from './resumenFac.js';
 
 let chartRef = null;
 const charts = {};
+let navStack = [];
 
 export function openModal(html) {
-  document.querySelector('#modal').innerHTML = html;
+  const m = document.querySelector('#modal');
+  m.innerHTML = html;
   document.querySelector('#ov').classList.add('show');
+  m.querySelectorAll('[data-mf]').forEach(inp => {
+    const card = inp.closest('.tablecard, .card') || m;
+    const tbl = card.querySelector('table');
+    if (!tbl) return;
+    inp.addEventListener('input', () => {
+      const q = inp.value.toLowerCase().trim();
+      tbl.querySelectorAll('tbody tr').forEach(tr => { tr.style.display = (!q || tr.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
+    });
+  });
 }
 export function closeModal() {
   document.querySelector('#ov').classList.remove('show');
   ['cD', 'cG', 'cC'].forEach(destroyChart);     // gráficas de modal
+  navStack = [];
 }
 export function destroyChart(id) { if (charts[id]) { try { charts[id].destroy(); } catch (e) {} delete charts[id]; } }
+
+/* navegación entre detalles: cada "thunk" reabre su modal */
+export function navOpen(thunk) { navStack = [thunk]; thunk(); }          // detalle de primer nivel (sin volver)
+export function navPush(thunk) { navStack.push(thunk); thunk(); }        // detalle anidado (con volver)
+export function navBack() { navStack.pop(); const p = navStack[navStack.length - 1]; if (p) p(); else closeModal(); }
+export function navCanBack() { return navStack.length > 1; }
+export function backBtn() { return navCanBack() ? `<button class="btn" style="float:left;margin-right:10px" onclick="window.__navBack()">← Volver</button>` : ''; }
+window.__navBack = navBack;
 window.closeModal = closeModal; // para el botón × inline
 
 /* pill de estado/tendencia */
@@ -61,9 +81,9 @@ export function materialesTablaHTML(mats) {
 }
 
 /* línea mensual importe + cantidad */
-export function drawSerie(canvasId, serie, label) {
+export function drawSerie(canvasId, serie, label, monthRange) {
   const cv = document.getElementById(canvasId); if (!cv) return;
-  const data = completarSerie(serie || []);
+  const data = completarSerie(serie || [], monthRange);
   destroyChart(canvasId);
   if (!data.length) { cv.parentElement.innerHTML = '<p class="muted">Sin facturación para graficar.</p>'; return; }
   charts[canvasId] = new Chart(cv, {

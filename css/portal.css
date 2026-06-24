@@ -150,3 +150,24 @@ th.sortable:hover{color:var(--tx)}
 .segm .seg{background:var(--panel2);color:var(--mut);border:none;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600}
 .segm .seg:hover{color:var(--tx)}
 .segm .seg.on{background:var(--acc);color:#04140a}
+
+/* filtro dentro de detalles */
+.mff{width:100%;max-width:340px;margin:6px 0 10px;padding:7px 10px;border:1px solid var(--bd);background:var(--panel2);color:var(--tx);border-radius:8px}
+#btnAdmin{margin-left:8px}
+
+.periodo{display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap}
+.periodo label{font-size:12px;color:var(--mut);display:inline-flex;gap:4px;align-items:center}
+.periodo input[type=date]{padding:6px 8px;border:1px solid var(--bd);background:var(--panel2);color:var(--tx);border-radius:8px;font-size:12px}
+
+/* ===== mejoras visuales/interacción ===== */
+.tbl{max-height:72vh;overflow:auto}
+.tbl table thead th{position:sticky;top:0;z-index:3;background:var(--panel2);box-shadow:0 1px 0 var(--bd)}
+.tbl table tbody tr:nth-child(even):not(.bloq){background:rgba(255,255,255,.018)}
+.tbl table tbody tr:hover{background:rgba(139,197,63,.10)}
+.tbl table tbody tr.click{cursor:pointer}
+.periodo input[type=date]{min-width:172px;width:172px}
+/* vigencia pill */
+.vig{font-size:10px;margin-top:2px;display:inline-block;padding:1px 6px;border-radius:8px;font-weight:700}
+.vig.rojo{background:#3a0f0f;color:#ff7b72}
+.vig.amb{background:#332b0c;color:#e3b341}
+.vig.verde{background:#0f2a16;color:#56d364}

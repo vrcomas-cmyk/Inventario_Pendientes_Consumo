@@ -46,9 +46,8 @@ export function toolbarHTML(columns, f, extra = '') {
 
 export function wireToolbar(container, f, rerender, onSearch, suggestFn) {
   const fs = container.querySelector('[data-fs]');
-  // El buscador solo refresca resultados (onSearch); NO reconstruye la barra,
-  // así el input conserva foco/cursor y admite espacios.
-  if (fs) fs.oninput = e => { f.q = e.target.value; (onSearch || rerender)(); };
+  // El buscador refresca resultados con un pequeño debounce (fluidez con muchos datos)
+  if (fs) { let tmr; fs.oninput = e => { f.q = e.target.value; clearTimeout(tmr); tmr = setTimeout(() => (onSearch || rerender)(), 180); }; }
   const colSel = container.querySelector('[data-fcol]');
   const dl = container.querySelector('#fsugg');
   const fillSugg = () => {
@@ -69,6 +68,69 @@ export function wireToolbar(container, f, rerender, onSearch, suggestFn) {
   const clr = container.querySelector('[data-fclear]');
   if (clr) clr.onclick = () => { f.list = []; rerender(); };
   container.querySelectorAll('[data-rm]').forEach(x => x.onclick = () => { f.list.splice(+x.dataset.rm, 1); rerender(); });
+}
+
+/* ---- filtro por periodo (presets relativos al mes corriente) ---- */
+export const PERIODOS = [
+  ['', 'Periodo: todo'], ['cur', 'Mes corriente'], ['3', 'Últimos 3 meses'], ['6', 'Últimos 6 meses'],
+  ['12', 'Últimos 12 meses'], ['q', 'Trimestre corriente'], ['y', 'Año en curso'], ['y1', 'Año anterior'],
+];
+export function periodoRange(key, curmes) {
+  const [cm, cy] = String(curmes || '').split('/').map(Number);
+  if (!cm) return null;
+  const cur = cy * 12 + cm;
+  switch (key) {
+    case 'cur': return [cur, cur];
+    case '3':   return [cur - 2, cur];
+    case '6':   return [cur - 5, cur];
+    case '12':  return [cur - 11, cur];
+    case 'q':   { const qs = cy * 12 + (Math.floor((cm - 1) / 3) * 3 + 1); return [qs, qs + 2]; }
+    case 'y':   return [cy * 12 + 1, cy * 12 + 12];
+    case 'y1':  return [(cy - 1) * 12 + 1, (cy - 1) * 12 + 12];
+    default:    return null;
+  }
+}
+/* preset -> [desdeISO, hastaISO] (para rellenar los date inputs) */
+export function periodoISO(key, curmes) {
+  const r = periodoRange(key, curmes); if (!r) return ['', ''];
+  const fk = k => ({ y: Math.floor((k - 1) / 12), m: ((k - 1) % 12) + 1 });
+  const a = fk(r[0]), b = fk(r[1]); const last = new Date(b.y, b.m, 0).getDate(); const p = n => String(n).padStart(2, '0');
+  return [`${a.y}-${p(a.m)}-01`, `${b.y}-${p(b.m)}-${p(last)}`];
+}
+/* parseo de fechas de celda -> número yyyymmdd */
+export function dayNum(v) {
+  const s = String(v == null ? '' : v).trim(); if (!s) return null;
+  let m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(s); if (m) { let y = +m[3]; if (y < 100) y += 2000; return y * 10000 + (+m[2]) * 100 + (+m[1]); }
+  m = /^(\d{1,2})\/(\d{4})$/.exec(s); if (m) return (+m[2]) * 10000 + (+m[1]) * 100 + 1;
+  m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s); if (m) return (+m[1]) * 10000 + (+m[2]) * 100 + (+m[3]);
+  return null;
+}
+const isoNum = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || ''); return m ? (+m[1]) * 10000 + (+m[2]) * 100 + (+m[3]) : null; };
+export function dateRange(desde, hasta) { const d0 = isoNum(desde), d1 = isoNum(hasta); if (d0 == null && d1 == null) return null; return [d0 ?? 0, d1 ?? 99999999]; }
+export function inRangeDay(value, range) { if (!range) return true; const d = dayNum(value); if (d == null) return false; return d >= range[0] && d <= range[1]; }
+export function inRangeMonth(value, range) { if (!range) return true; const d = dayNum(value); if (d == null) return false; const mk = Math.floor(d / 100); return mk >= Math.floor(range[0] / 100) && mk <= Math.floor(range[1] / 100); }
+
+export function periodoSelectHTML(val) {
+  return `<select data-periodo>${PERIODOS.map(([k, l]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+}
+/* control de periodo: presets + rango de fechas personalizado */
+export function periodoControlHTML(flt) {
+  return `<span class="periodo">
+    <select data-pre>${PERIODOS.map(([k, l]) => `<option value="${k}" ${(!flt.desde && !flt.hasta && flt.periodo === k) ? 'selected' : ''}>${l}</option>`).join('')}<option value="custom" ${(flt.desde || flt.hasta) ? 'selected' : ''}>Rango personalizado</option></select>
+    <label>Desde <input type="date" data-d0 value="${flt.desde || ''}"></label>
+    <label>Hasta <input type="date" data-d1 value="${flt.hasta || ''}"></label>
+  </span>`;
+}
+/* cablea el control de periodo; rerender() repinta la vista */
+export function wirePeriodo(container, flt, curmes, rerender) {
+  const pre = container.querySelector('[data-pre]'), d0 = container.querySelector('[data-d0]'), d1 = container.querySelector('[data-d1]');
+  if (pre) pre.onchange = e => {
+    const v = e.target.value;
+    if (v === 'custom') { flt.periodo = ''; rerender(); return; }
+    flt.periodo = v; const [a, b] = periodoISO(v, curmes); flt.desde = a; flt.hasta = b; rerender();
+  };
+  if (d0) d0.onchange = e => { flt.desde = e.target.value; flt.periodo = ''; rerender(); };
+  if (d1) d1.onchange = e => { flt.hasta = e.target.value; flt.periodo = ''; rerender(); };
 }
 
 /* genera sugerencias (valores distintos) por columna a partir de las filas */

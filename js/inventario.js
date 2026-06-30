@@ -5,16 +5,17 @@
    =========================================================================== */
 import { norm, num, fmt, money, esc, vigencia } from './utils.js';
 import { store, C, RC } from './store.js';
-import { serieMatDest, tendenciaTexto, mesLabel, aMesAnio } from './resumenFac.js';
-import { openModal, pill, trendText, rankingHTML, navOpen, navPush, backBtn } from './ui.js';
+import { serieMatDest, serieMaterial, precioMinAnioMaterial, clientesPorMesMaterial, tendenciaTexto, mesLabel, aMesAnio } from './resumenFac.js';
+import { openModal, pill, trendText, rankingHTML, navOpen, navPush, backBtn, drawSerie, openClientesMes } from './ui.js';
 import { consumoTableHTML, consumoMaterialRows, openConsumoMaterial } from './consumo.js';
-import { openDetalle } from './sugerencias.js';
+import { openDetalle, openPedido } from './sugerencias.js';
 import { ejecutivoNombre, grupoCliente } from './enrich.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
 import { makeSort, cycleSort, applySort, th } from './sort.js';
 import { exportXlsx, stamp } from './exportx.js';
 import { INV_CFG } from './invConfig.js';
+import { kvGet, kvSet } from './persist.js';
 
 let CONS = null, DET = null, INVCODES = [], F = {}, loaded = false, loading = false, loadErr = '';
 const flt = makeFilters();
@@ -64,19 +65,40 @@ function diasCad(v) { const d = parseFecha(v); if (!d) return null; const h = ne
 const cadCls = d => d == null ? 'gris' : d < 0 ? 'rojo' : d <= INV_CFG.expiry.mes1 ? 'rojo' : d <= INV_CFG.expiry.mes6 ? 'amb' : 'verde';
 const estadoCad = d => d == null ? 'Sin fecha' : d < 0 ? 'Vencido' : d <= INV_CFG.expiry.mes3 ? 'Por vencer' : 'Vigente';
 
-async function load() {
+let invTs = 0;
+async function load(force = false) {
   loading = true; loadErr = '';
   try {
-    const u1 = `${INV_CFG.apiUrl}?tab=${encodeURIComponent(INV_CFG.tabs.detalle)}`;
-    const u2 = `${INV_CFG.apiUrl}?tab=${encodeURIComponent(INV_CFG.tabs.consolidado)}`;
-    const [d, c] = await Promise.all([
-      fetch(u1).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status + ' InvDetalle'); return r.json(); }),
-      fetch(u2).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status + ' InvConsolidado'); return r.json(); }),
-    ]);
+    let d, c;
+    if (!force) {
+      const cached = await kvGet('inv_cache').catch(() => null);
+      if (cached && cached.d && cached.c) {
+        const ageDays = (Date.now() - (cached.ts || 0)) / 86400000;
+        if (ageDays < (INV_CFG.cacheDays || 3)) { d = cached.d; c = cached.c; invTs = cached.ts || 0; }
+      }
+    }
+    if (!d || !c) {
+      const u1 = `${INV_CFG.apiUrl}?tab=${encodeURIComponent(INV_CFG.tabs.detalle)}`;
+      const u2 = `${INV_CFG.apiUrl}?tab=${encodeURIComponent(INV_CFG.tabs.consolidado)}`;
+      [d, c] = await Promise.all([
+        fetch(u1).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status + ' InvDetalle'); return r.json(); }),
+        fetch(u2).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status + ' InvConsolidado'); return r.json(); }),
+      ]);
+      invTs = Date.now();
+      kvSet('inv_cache', { ts: invTs, d, c }).catch(() => {});
+    }
     DET = normalize(d); CONS = normalize(c); detectFields(CONS); loaded = true;
   } catch (e) { loadErr = e.message || String(e); }
   finally { loading = false; }
 }
+export function invUpdatedTxt() {
+  if (!invTs) return '';
+  const mins = Math.floor((Date.now() - invTs) / 60000);
+  if (mins < 60) return `actualizado hace ${mins} min`;
+  const hrs = Math.floor(mins / 60); if (hrs < 24) return `actualizado hace ${hrs} h`;
+  const days = Math.floor(hrs / 24); return `actualizado hace ${days} día(s)`;
+}
+export async function refreshInvData() { await load(true); }
 
 const cols = () => [
   { key: 'mat', label: 'Material', get: r => r[F.material] },
@@ -111,10 +133,14 @@ export function renderInventario(container) {
                 ${F.grupo ? sel('grupo', flt.grupo, distinct(F.grupo), 'Grupo (todos)') : ''}
                 ${F.sector ? sel('sector', flt.sector, distinct(F.sector), 'Sector (todos)') : ''}`;
   const adminBtn = `<button class="btn ${isAdmin ? 'primary' : ''}" data-admin>${isAdmin ? '🔓 Admin ON' : '🔒 Admin'}</button>`;
-  const expBtn = `<button class="btn" data-exp>⬇️ Excel</button><button class="btn" data-clearall>🧹 Limpiar todo</button>`;
+  const expBtn = `<button class="btn" data-exp>⬇️ Excel</button><button class="btn" data-clearall>🧹 Limpiar todo</button><button class="btn" data-invref title="${esc(invUpdatedTxt())}">🔄 Inventario</button>`;
 
-  container.innerHTML = `${toolbarHTML(cols(), flt, `${cats}${zoomHTML('inv')}${expBtn}${adminBtn}`)}<div class="result"></div>`;
-  wireToolbar(container, flt, () => renderInventario(container), () => paint(container), makeSuggest(CONS || [], cols()));
+  container.innerHTML = `${toolbarHTML(cols(), flt, `${cats}${zoomHTML('inv')}${expBtn}${adminBtn}`, 'dl-inv')}<div class="result"></div>`;
+  wireToolbar(container, flt, () => renderInventario(container), () => paint(container), makeSuggest(filtered(), cols()));
+  container.querySelector('[data-invref]')?.addEventListener('click', async e => {
+    const b = e.currentTarget; const old = b.textContent; b.textContent = '⏳ Actualizando…'; b.disabled = true;
+    await refreshInvData(); renderInventario(container);
+  });
   container.querySelectorAll('[data-cat]').forEach(s => s.onchange = e => { flt[e.target.dataset.cat] = e.target.value; paint(container); });
   container.querySelector('[data-admin]').onclick = () => { admin.setOn(!isAdmin); renderInventario(container); };
   container.querySelector('[data-exp]').onclick = () => exportInv();
@@ -148,9 +174,11 @@ function paint(container) {
   if (!isAdmin) list = list.filter(r => !hidden.has(rowKey(r)));
   list = applySort(list, sort, accessor);
 
-  const totMat = new Set((DET || []).map(r => norm(r.Material)).filter(Boolean)).size;
-  const totLotes = (DET || []).length;
-  const totUni = (DET || []).reduce((s, r) => s + num(r.CantidadDisp), 0);
+  const matsF = new Set(list.map(r => norm(r[F.material])).filter(Boolean));
+  const detF = (DET || []).filter(r => matsF.has(norm(r.Material)));
+  const totMat = matsF.size;
+  const totLotes = detF.length;
+  const totUni = detF.reduce((s, r) => s + num(r.CantidadDisp), 0);
   const totImp = F.importe ? list.reduce((s, r) => s + num(r[F.importe]), 0) : 0;
 
   const condByMat = new Map();
@@ -185,9 +213,9 @@ function paint(container) {
   container.querySelector('.result').innerHTML = `
     <div class="invtop">
       <div class="kpis2x2">
-        <div class="kpi sm"><div class="lbl">Materiales</div><div class="val">${fmt(totMat)}</div></div>
-        <div class="kpi sm"><div class="lbl">Lotes</div><div class="val">${fmt(totLotes)}</div></div>
-        <div class="kpi sm"><div class="lbl">Stock global</div><div class="val">${fmt(totUni)}</div></div>
+        <div class="kpi sm"><div class="lbl">Materiales (filtro)</div><div class="val">${fmt(totMat)}</div></div>
+        <div class="kpi sm"><div class="lbl">Lotes (filtro)</div><div class="val">${fmt(totLotes)}</div></div>
+        <div class="kpi sm"><div class="lbl">Stock (filtro)</div><div class="val">${fmt(totUni)}</div></div>
         <div class="kpi sm"><div class="lbl">Importe (filtro)</div><div class="val" style="font-size:18px">${money(totImp)}</div></div>
       </div>
       ${rankingHTML(rk, { title: '🏆 Top 10 por Importe $', money: true })}
@@ -256,7 +284,7 @@ function showLotes(material, centro, almacen) {
   const pOferta = precioInvMat(material);
   const sugBody = sug.map((it, i) => { const b = it.bo, bl = norm(b[C.bloq]);
     return `<tr class="click ${bl ? 'bloq' : ''}" data-si="${i}">
-      <td><b>${esc(b[C.pedido])}</b><div class="sub">OC ${esc(b[C.oc]) || '—'}</div></td>
+      <td><b><span class="lnk" data-ped="${esc(b[C.pedido])}">${esc(b[C.pedido])}</span></b><div class="sub">OC ${esc(b[C.oc]) || '—'}</div></td>
       <td>${esc(b[C.fecha]) || '—'}</td>
       <td>${esc(b[C.razon])}<div class="sub">Solic ${esc(b[C.solic])} · Dest ${esc(b[C.dest])}</div></td>
       <td>${esc(grupoCliente(b[C.gpo]) || b[C.gpo]) || '—'}</td>
@@ -279,6 +307,12 @@ function showLotes(material, centro, almacen) {
     <button class="seg on" data-view="sug">📋 Sugerencias (${sug.length})</button>
     <button class="seg" data-view="cons">📊 Consumo (${consRows.length})</button></div>`;
 
+  const matSerie = serieMaterial(material);
+  const matTnd = tendenciaTexto(matSerie);
+  const matPmin = precioMinAnioMaterial(material);
+  const matCurYear = (store.CURMES || '').split('/')[1] || '';
+  const matImp12 = (() => { let s = 0; const lo = matSerie.length - 12; matSerie.forEach((p, idx) => { if (idx >= lo) s += p.imp; }); return s; })();
+
   openModal(`
     ${backBtn()}<button class="x" onclick="closeModal()">×</button>
     <h2>${titulo}</h2>
@@ -287,11 +321,21 @@ function showLotes(material, centro, almacen) {
       <table><thead><tr><th>Centro</th><th>Almacén</th><th>Lote</th><th>Caducidad / vigencia</th><th class="num">Días</th><th class="num">Cantidad</th><th class="num">Precio</th></tr></thead>
       <tbody>${body || '<tr><td colspan="7" class="muted" style="padding:16px;text-align:center">Sin lotes.</td></tr>'}</tbody></table>
     </div></div>
+    <div class="tablecard">
+      <h3>📈 Tendencia del material <span class="hint">facturación mensual (Resumen_Fac)</span></h3>
+      <div class="consu" style="margin-bottom:8px">
+        <div class="b"><div class="t">Tendencia</div><div class="m">${trendText(matTnd)}</div></div>
+        <div class="b"><div class="t">Precio mín. facturado (año ${esc(matCurYear)})</div><div class="m">${matPmin != null ? money(matPmin) : '—'}</div></div>
+        <div class="b"><div class="t">Facturación últ. 12 m</div><div class="m">${money(matImp12)}</div></div>
+      </div>
+      <div class="chartbox" style="height:220px;padding:10px"><canvas id="cMat"></canvas></div>
+    </div>
     ${seg}
     <div class="tablecard" data-pane="sug"><h3>📋 Sugerencias con este material <span class="hint">clic en una fila para ver el detalle</span> <button class="btn" data-expsug style="float:right">⬇️ Excel</button></h3><input class="mff" data-mf placeholder="🔎 filtrar…">${sugTable}</div>
     <div class="tablecard" data-pane="cons" style="display:none"><h3>📊 Clientes que han facturado este material <span class="hint">clic en una fila para ver el detalle</span> <button class="btn" data-expcons style="float:right">⬇️ Excel</button></h3><input class="mff" data-mf placeholder="🔎 filtrar…">${consTable}</div>`);
 
   const pickC = (r, names) => { for (const n of names) { const v = norm(r[n]); if (v) return v; } return ''; };
+  if (document.getElementById('cMat')) drawSerie('cMat', matSerie, 'Facturación mensual', undefined, mes => navPush(() => openClientesMes(material, mes)));
   const expc = document.querySelector('#modal [data-expcons]');
   if (expc) expc.onclick = () => {
     const vis = [...document.querySelectorAll('#modal [data-pane="cons"] tbody tr[data-cmi]')].filter(tr => tr.style.display !== 'none').map(tr => +tr.dataset.cmi);
@@ -329,6 +373,7 @@ function showLotes(material, centro, almacen) {
     panes.sug.style.display = v === 'sug' ? '' : 'none';
     panes.cons.style.display = v === 'cons' ? '' : 'none';
   }));
+  document.querySelectorAll('#modal [data-ped]').forEach(el => el.addEventListener('click', ev => { ev.stopPropagation(); navPush(() => openPedido(el.dataset.ped)); }));
   document.querySelectorAll('#modal tr[data-si]').forEach(tr => tr.addEventListener('click', () => navPush(() => openDetalle(sug[+tr.dataset.si]))));
   document.querySelectorAll('#modal tr[data-cmi]').forEach(tr => tr.addEventListener('click', () => openConsumoMaterial(consRows[+tr.dataset.cmi])));
 }

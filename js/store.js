@@ -34,6 +34,7 @@ export const C = {
 export const RFC = {
   solic:'Solicitante', razon:'Razón Social', dest:'Destinatario', material:'Material',
   texto:'Texto de material', mes:'Mes y año', cant:'Cantidad facturada', imp:'Importe facturado',
+  centro:'Centro',
 };
 
 /* Columnas de "Reporte de Consumo" */
@@ -42,6 +43,7 @@ export const RC = {
   material:'Material', texto:'Texto Material', consumoAct:'Consumo_actual', promedio:'Consumo_promedio_mensual',
   tendencia:'Tendencia', ultMes:'Ultimo mes facturacion', cantUlt:'Cantidad ultima', impUlt:'Importe ultima',
   penFecha:'Penultima_fecha', cantPen:'Cantidad_penultima', impPen:'Importe_penultima',
+  ultFacDest:'Ultima_facturacion_destinatario',
   precioMin:'precio_min', precioMax:'precio_max', precioProm:'precio_prom',
   precioUltUni:'Precio_unitario_ultima', precioPenUni:'Precio_unitario_penultima',
 };

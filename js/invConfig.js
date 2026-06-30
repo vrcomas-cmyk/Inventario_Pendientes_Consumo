@@ -7,4 +7,5 @@ export const INV_CFG = {
   tabs: { detalle: 'InvDetalle', consolidado: 'InvConsolidado' },
   expiry: { mes1: 30, mes3: 91, mes6: 182 },  // rojo / naranja / ámbar
   lowStock: 50,
+  cacheDays: 3,   // el inventario se actualiza 1-2 veces/semana → cachear y refrescar manual
 };

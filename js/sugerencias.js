@@ -7,7 +7,7 @@ import { serieMatDest, serieSolic, serieDest, consumoDe, clasificarEstado,
          tendenciaTexto, comparativa, materialesDe, mesLabel, aMesAnio } from './resumenFac.js';
 import { ESTADOS } from './resumenFac.js';
 import { openModal, drawSerie, pill, trendText, invGrid, rankingHTML,
-         comparativaHTML, materialesTablaHTML, backBtn, navOpen, navPush } from './ui.js';
+         comparativaHTML, materialesTablaHTML, backBtn, navOpen, navPush, openClientesMes } from './ui.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest, periodoControlHTML, wirePeriodo, dateRange, inRangeDay } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
 import { makeSort, cycleSort, applySort, th } from './sort.js';
@@ -74,6 +74,7 @@ const cols = () => [
   { key: 'sector', label: 'Sector', get: it => sectorDe(it.bo) },
   { key: 'grupoart', label: 'Grupo art.', get: it => grupoArt(it.bo) },
   { key: 'centro', label: 'Centro', get: it => it.bo[C.centro] },
+  { key: 'almacen', label: 'Almacén', get: it => it.bo[C.alm] },
   { key: 'bloq', label: 'Bloqueado', get: it => bloqDe(it.bo) },
 ];
 function filtered() {
@@ -100,8 +101,8 @@ export function renderSug(container) {
   const ts = enrichTs();
   const updBtn = `<button class="btn" data-upd title="${ts ? 'Última actualización: ' + new Date(ts).toLocaleString('es-MX') : 'Sin descargar aún'}">🔄 Actualizar Ejecutivos/Materiales</button>`;
   const expBtn = `<button class="btn" data-exp>⬇️ Excel</button><button class="btn" data-clearall>🧹 Limpiar todo</button>`;
-  container.innerHTML = `${toolbarHTML(cols(), flt, `${estSel}${fueSel}${periodoControlHTML(flt)}${zoomHTML('sug')}${expBtn}${updBtn}`)}<div class="result"></div>`;
-  wireToolbar(container, flt, () => renderSug(container), () => paint(container), makeSuggest(store.BO, cols()));
+  container.innerHTML = `${toolbarHTML(cols(), flt, `${estSel}${fueSel}${periodoControlHTML(flt)}${zoomHTML('sug')}${expBtn}${updBtn}`, 'dl-sug')}<div class="result"></div>`;
+  wireToolbar(container, flt, () => renderSug(container), () => paint(container), makeSuggest(filtered(), cols()));
   container.querySelector('[data-est]').onchange = e => { flt.estado = e.target.value; paint(container); };
   container.querySelector('[data-fue]').onchange = e => { flt.fuente = e.target.value; paint(container); };
   wirePeriodo(container, flt, store.CURMES, () => renderSug(container));
@@ -114,8 +115,10 @@ export function renderSug(container) {
   paint(container);
 }
 
+let lastList = [];
 function paint(container) {
   const list = applySort(filtered(), sort, accessor);
+  lastList = list;
   const isBloq = it => bloqDe(it.bo) !== '';
   const pendTot = list.reduce((s, it) => s + num(it.bo[C.pend]), 0);
   const pendBloq = list.filter(isBloq).reduce((s, it) => s + num(it.bo[C.pend]), 0);
@@ -131,19 +134,20 @@ function paint(container) {
   });
   const rk = [...rkMap.values()].filter(x => x.val > 0).sort((a, b) => b.val - a.val).slice(0, 10);
 
-  const rows = list.map((it, i) => {
+  const boMap = new Map(list.map(it => [it.k, it]));
+  const rows = list.map(it => {
     const b = it.bo, bl = bloqDe(b), cen = `${esc(b[C.centro])}${norm(b[C.alm]) ? ' / ' + esc(b[C.alm]) : ''}`;
-    return `<tr class="click ${bl ? 'bloq' : ''}" data-i="${i}">
+    return `<tr class="click ${bl ? 'bloq' : ''}" data-k="${esc(it.k)}">
       <td><div>${esc(grupoCli(b))}</div><div class="sub">${esc(normCode(b[C.gpo]))}</div></td>
-      <td><span class="lnk" data-ev="ped" data-k="${esc(b[C.pedido])}"><b>${esc(b[C.pedido])}</b></span><div class="sub">OC ${esc(b[C.oc]) || '—'}</div></td>
+      <td><span class="lnk" data-ev="ped" data-key="${esc(b[C.pedido])}"><b>${esc(b[C.pedido])}</b></span><div class="sub">OC ${esc(b[C.oc]) || '—'}</div></td>
       <td>${esc(b[C.fecha])}</td>
       <td><div>${esc(b[C.razon])}</div>
         <div style="font-size:11px;margin-top:2px">
-          <span class="lnk" data-ev="solic" data-k="${esc(b[C.solic])}">Solic ${esc(b[C.solic])}</span> ·
-          <span class="lnk" data-ev="dest"  data-k="${esc(b[C.dest])}">Dest ${esc(b[C.dest])}</span></div></td>
+          <span class="lnk" data-ev="solic" data-key="${esc(b[C.solic])}">Solic ${esc(b[C.solic])}</span> ·
+          <span class="lnk" data-ev="dest"  data-key="${esc(b[C.dest])}">Dest ${esc(b[C.dest])}</span></div></td>
       <td>${esc(ejecDe(b)) || '—'}</td>
       <td>${cen}</td>
-      <td><span class="lnk" data-ev="det" data-i="${i}">${esc(b[C.matBase])}</span><div class="sub">${esc(b[C.descSol])}</div></td>
+      <td><span class="lnk" data-ev="det">${esc(b[C.matBase])}</span><div class="sub">${esc(b[C.descSol])}</div></td>
       <td>${esc(sectorDe(b)) || '—'}<div class="sub">${esc(grupoArt(b)) || ''}</div></td>
       <td class="num">${fmt(b[C.cantPed])}</td><td class="num">${fmt(b[C.pend])}</td>
       <td class="num">${money(b[C.precio])}</td><td class="num">${fmt(it.consumoProm)}</td>
@@ -152,7 +156,7 @@ function paint(container) {
       <td>${bl ? `<span class="pill amb">${esc(bl)}</span>` : '—'}</td>
       <td>${pill(it.status.label, it.status.cls)}</td>
       <td>${trendText(it.tend)}</td>
-      <td class="num"><span class="lnk" data-ev="det" data-i="${i}">${it.fuentes.length || '—'}</span></td>
+      <td class="num"><span class="lnk" data-ev="det">${it.fuentes.length || '—'}</span></td>
     </tr>`;
   }).join('');
 
@@ -189,13 +193,13 @@ function paint(container) {
   }));
   container.querySelectorAll('.result [data-ev]').forEach(el => el.addEventListener('click', ev => {
     ev.stopPropagation();
-    const kind = el.dataset.ev, l2 = filtered();
-    if (kind === 'det') navOpen(() => openDetalle(l2[+el.dataset.i]));
-    else if (kind === 'ped') navOpen(() => openPedido(el.dataset.k));
-    else if (kind === 'solic') navOpen(() => openEvol('solic', el.dataset.k));
-    else if (kind === 'dest') navOpen(() => openEvol('dest', el.dataset.k));
+    const kind = el.dataset.ev;
+    if (kind === 'det') { const it = boMap.get(el.closest('tr').dataset.k); if (it) navOpen(() => openDetalle(it)); }
+    else if (kind === 'ped') navOpen(() => openPedido(el.dataset.key));
+    else if (kind === 'solic') navOpen(() => openEvol('solic', el.dataset.key));
+    else if (kind === 'dest') navOpen(() => openEvol('dest', el.dataset.key));
   }));
-  container.querySelectorAll('.result tr.click').forEach(tr => tr.addEventListener('click', () => navOpen(() => openDetalle(filtered()[+tr.dataset.i]))));
+  container.querySelectorAll('.result tr.click').forEach(tr => tr.addEventListener('click', () => { const it = boMap.get(tr.dataset.k); if (it) navOpen(() => openDetalle(it)); }));
 }
 
 function exportSug() {
@@ -289,7 +293,7 @@ export function openDetalle(it, fromPedido) {
   openModal(`
     ${backBtn()}<button class="x" onclick="closeModal()">×</button>
     ${cabecera(b)}
-    <p class="muted">Pedido ${esc(b[C.pedido])} · OC ${esc(b[C.oc]) || '—'} · Material ${esc(b[C.matBase])} — ${esc(b[C.descSol])} ${bl ? '· <span class="pill amb">' + esc(bl) + '</span>' : ''}</p>
+    <p class="muted">Pedido <span class="lnk" id="goped">${esc(b[C.pedido])}</span> · OC ${esc(b[C.oc]) || '—'} · Material ${esc(b[C.matBase])} — ${esc(b[C.descSol])} ${bl ? '· <span class="pill amb">' + esc(bl) + '</span>' : ''}</p>
     <div class="mkpis">
       <div class="stat"><div class="l">Pendiente</div><div class="v">${fmt(b[C.pend])}</div></div>
       <div class="stat"><div class="l">Precio</div><div class="v">${money(b[C.precio])}</div></div>
@@ -307,18 +311,92 @@ export function openDetalle(it, fromPedido) {
       <h3 style="margin-top:12px">🚚 Material en curso (tránsito) por almacén</h3>${transito.length ? invGrid(transito) : '<p class="muted">Sin material en tránsito.</p>'}</div>
   `);
   drawSerie('cD', it.serie, '');
+  document.getElementById('goped')?.addEventListener('click', () => navPush(() => openPedido(b[C.pedido])));
 }
+function matsTableHTML(mats) {
+  if (!mats.length) return '<p class="muted">Sin materiales facturados.</p>';
+  const rows = mats.map(m => `<tr class="click" data-mat="${esc(m.material)}" data-sector="${esc(m.sector)}" data-grupo="${esc(m.grupo)}">
+    <td><span class="lnk">${esc(m.material)}</span></td><td>${esc(m.texto)}</td>
+    <td>${esc(m.sector) || '—'}</td><td>${esc(m.grupo) || '—'}</td>
+    <td>${m.ultimo ? esc(mesLabel(m.ultimo.mes)) : '—'}</td>
+    <td class="num">${m.ultimo ? money(m.ultimo.imp) : '—'}</td>
+    <td>${trendText(m.tend)}</td></tr>`).join('');
+  return `<div class="tbl" style="max-height:300px"><table><thead><tr><th>Material</th><th>Descripción</th><th>Sector</th><th>Grupo art.</th><th>Último mes</th><th class="num">Importe</th><th>Tendencia</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function openCodigoEvol(kind, key, material) {
+  const serie = kind === 'solic'
+    ? ((store.RF.solicMats.get(norm(key)) || new Map()).get(norm(material)) || [])
+    : (serieMatDest(key, material) || []);
+  const texto = store.RF.matTexto.get(norm(material)) || '';
+  openModal(`${backBtn()}<button class="x" onclick="closeModal()">×</button>
+    <h2>${esc(material)} · ${esc(texto)}</h2>
+    <p class="muted">${kind === 'solic' ? 'Solicitante' : 'Destinatario'} ${esc(key)} · comportamiento del material</p>
+    <div class="card"><h3>📊 Comparativo anual</h3>${comparativaHTML(comparativa(serie))}</div>
+    <div class="card"><h3>📈 Evolución mensual <span class="hint">clic en un mes = clientes de ese material</span></h3><div class="chartbox"><canvas id="cCod"></canvas></div></div>`);
+  drawSerie('cCod', serie, 'Importe', undefined, mes => navPush(() => openClientesMes(material, mes)));
+}
+
 export function openEvol(kind, key) {
   if (!store.RF) { alert('No hay Resumen_Fac cargado.'); return; }
+  window.__openDestEvol = d => openEvol('dest', d);
+  window.__openDestEvol = d => openEvol('dest', d);
   const serie = kind === 'solic' ? serieSolic(key) : serieDest(key);
   const titulo = kind === 'solic' ? 'Facturación general del Solicitante' : 'Facturación general del Destinatario';
-  const mats = materialesDe(kind, key);
+  const mats = materialesDe(kind, key).map(m => ({ ...m, sector: matSector(m.material) || '', grupo: matGrupo(m.material) || '' }));
+
+  let destCard = '';
+  if (kind === 'solic') {
+    const dmap = new Map();
+    (store.FACROWS || []).forEach(r => {
+      if (norm(r['Solicitante']) !== norm(key)) return;
+      const d = norm(r['Destinatario']); if (!d) return;
+      let o = dmap.get(d); if (!o) { o = { dest: d, imp: 0, cant: 0 }; dmap.set(d, o); }
+      o.imp += num(r['Importe facturado']); o.cant += num(r['Cantidad facturada']);
+    });
+    const drows = [...dmap.values()].sort((a, b) => b.imp - a.imp).map(d =>
+      `<tr class="click" data-dest="${esc(d.dest)}"><td><span class="lnk">Dest ${esc(d.dest)}</span></td><td class="num">${fmt(d.cant)}</td><td class="num">${money(d.imp)}</td></tr>`).join('');
+    destCard = `<div class="card"><h3>🏢 Destinatarios de este solicitante <span class="hint">clic para ver su facturación</span></h3>
+      <div class="tbl" style="max-height:200px"><table><thead><tr><th>Destinatario</th><th class="num">Cantidad</th><th class="num">Importe</th></tr></thead><tbody>${drows || '<tr><td colspan="3" class="muted" style="padding:10px;text-align:center">Sin destinatarios.</td></tr>'}</tbody></table></div></div>`;
+  }
+
+  const sectores = [...new Set(mats.map(m => m.sector).filter(Boolean))].sort();
+  const grupos = [...new Set(mats.map(m => m.grupo).filter(Boolean))].sort();
+  const filtBar = `<div class="trow" style="gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+    <input class="mff" data-msearch placeholder="🔎 material / descripción…">
+    <select data-fsec><option value="">Sector (todos)</option>${sectores.map(s => `<option>${esc(s)}</option>`).join('')}</select>
+    <select data-fgru><option value="">Grupo art. (todos)</option>${grupos.map(g => `<option>${esc(g)}</option>`).join('')}</select></div>`;
+
   openModal(`
     ${backBtn()}<button class="x" onclick="closeModal()">×</button>
     <h2>${titulo}</h2>
     <p class="muted">${kind === 'solic' ? 'Solicitante' : 'Destinatario'}: ${esc(key)} · ${mats.length} material(es) facturado(s)</p>
-    <div class="card"><h3>📊 Comparativo anual</h3>${comparativaHTML(comparativa(serie))}</div>
-    <div class="card"><h3>📈 Evolución mensual — Importe facturado</h3><div class="chartbox"><canvas id="cG"></canvas></div></div>
-    <div class="card"><h3>🧾 Códigos facturados y su tendencia</h3><input class="mff" data-mf placeholder="🔎 filtrar códigos…">${materialesTablaHTML(mats)}</div>`);
+    <div class="card"><h3>📊 Comparativo anual <span class="hint">refleja el filtro de abajo</span></h3><div id="cmpWrap">${comparativaHTML(comparativa(serie))}</div></div>
+    <div class="card"><h3>📈 Evolución mensual — Importe facturado <span class="hint">refleja el filtro de abajo</span></h3><div class="chartbox"><canvas id="cG"></canvas></div></div>
+    ${destCard}
+    <div class="card"><h3>🧾 Códigos facturados y su tendencia <span class="hint">clic en un material para ver su comportamiento</span></h3>${filtBar}${matsTableHTML(mats)}</div>`);
   drawSerie('cG', serie, titulo);
+
+  const fsec = document.querySelector('#modal [data-fsec]'), fgru = document.querySelector('#modal [data-fgru]'), mf = document.querySelector('#modal [data-msearch]');
+  const matchMat = m => {
+    const s = fsec ? fsec.value : '', g = fgru ? fgru.value : '', q = norm(mf ? mf.value : '').toLowerCase();
+    if (s && m.sector !== s) return false;
+    if (g && m.grupo !== g) return false;
+    if (q && !((m.material + ' ' + m.texto).toLowerCase().includes(q))) return false;
+    return true;
+  };
+  const recompute = () => {
+    const ok = new Set(mats.filter(matchMat).map(m => m.material));
+    document.querySelectorAll('#modal tr[data-mat]').forEach(tr => { tr.style.display = ok.has(tr.dataset.mat) ? '' : 'none'; });
+    const bk = new Map();
+    mats.forEach(m => { if (!ok.has(m.material)) return; m.serie.forEach(p => { const c = bk.get(p.mes) || { cant: 0, imp: 0 }; c.cant += p.cant; c.imp += p.imp; bk.set(p.mes, c); }); });
+    const agg = [...bk.entries()].map(([mes, v]) => ({ mes, cant: v.cant, imp: v.imp })).sort((a, b) => mKey(a.mes) - mKey(b.mes));
+    const w = document.querySelector('#modal #cmpWrap'); if (w) w.innerHTML = comparativaHTML(comparativa(agg));
+    drawSerie('cG', agg, titulo);
+  };
+  if (fsec) fsec.onchange = recompute; if (fgru) fgru.onchange = recompute; if (mf) mf.oninput = recompute;
+  document.querySelectorAll('#modal tr[data-dest]').forEach(tr => tr.addEventListener('click', () => navPush(() => openEvol('dest', tr.dataset.dest))));
+  document.querySelectorAll('#modal tr[data-mat]').forEach(tr => tr.addEventListener('click', () => navPush(() => openCodigoEvol(kind, key, tr.dataset.mat))));
 }
+
+if (typeof window !== "undefined") window.__openDestEvol = d => openEvol("dest", d);

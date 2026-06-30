@@ -1,8 +1,8 @@
 /* ===========================================================================
    ui.js · modal, gráficas y pequeños renderers compartidos
    =========================================================================== */
-import { esc, fmt, money } from './utils.js';
-import { mesLabel, completarSerie } from './resumenFac.js';
+import { esc, fmt, money, norm } from './utils.js';
+import { mesLabel, completarSerie, aMesAnio, clientesPorMesMaterial } from './resumenFac.js';
 
 let chartRef = null;
 const charts = {};
@@ -35,6 +35,39 @@ export function navPush(thunk) { navStack.push(thunk); thunk(); }        // deta
 export function navBack() { navStack.pop(); const p = navStack[navStack.length - 1]; if (p) p(); else closeModal(); }
 export function navCanBack() { return navStack.length > 1; }
 export function backBtn() { return navCanBack() ? `<button class="btn" style="float:left;margin-right:10px" onclick="window.__navBack()">← Volver</button>` : ''; }
+
+/* clic en un mes de cualquier tendencia de material → clientes que facturaron ese mes, con filtro por centro */
+export function openClientesMes(material, mes) {
+  const all = clientesPorMesMaterial(material, mes) || [];
+  const centros = [...new Set(all.map(x => x.centro).filter(Boolean))].sort();
+  const tot = all.reduce((s, x) => s + x.imp, 0), totc = all.reduce((s, x) => s + x.cant, 0);
+  const rowsHtml = all.map(x => `<tr data-centro="${esc(x.centro)}" class="click" data-dest="${esc(x.dest)}">
+    <td>${esc(x.razon) || '—'}<div class="sub">Solic ${esc(x.solic)} · Dest ${esc(x.dest)}</div></td>
+    <td>${esc(x.centro) || '—'}</td><td class="num">${fmt(x.cant)}</td><td class="num">${money(x.imp)}</td></tr>`).join('');
+  openModal(`${backBtn()}<button class="x" onclick="closeModal()">×</button>
+    <h2>Clientes · ${esc(material)} · ${esc(mesLabel(aMesAnio(mes)) || mes)}</h2>
+    <p class="muted">${all.length} cliente(s) · ${fmt(totc)} pzs · ${money(tot)} · clic en un cliente para su facturación</p>
+    <div class="trow" style="margin-bottom:8px;gap:8px;align-items:center">
+      <label class="muted" style="font-size:12px">Centro:</label>
+      <select data-cf><option value="">(todos)</option>${centros.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
+      <input class="mff" data-csearch placeholder="🔎 filtrar cliente / destinatario…">
+    </div>
+    <div class="tablecard"><div class="tbl"><table>
+      <thead><tr><th>Cliente</th><th>Centro</th><th class="num">Cantidad</th><th class="num">Importe</th></tr></thead>
+      <tbody>${rowsHtml || '<tr><td colspan="4" class="muted" style="padding:14px;text-align:center">Sin facturación ese mes.</td></tr>'}</tbody>
+    </table></div></div>`);
+  const cf = document.querySelector('#modal [data-cf]'), cs = document.querySelector('#modal [data-csearch]');
+  const apply = () => {
+    const v = cf ? cf.value : '', q = norm(cs ? cs.value : '').toLowerCase();
+    document.querySelectorAll('#modal tbody tr[data-centro]').forEach(tr => {
+      const okC = !v || tr.dataset.centro === v, okQ = !q || tr.textContent.toLowerCase().includes(q);
+      tr.style.display = (okC && okQ) ? '' : 'none';
+    });
+  };
+  if (cf) cf.onchange = apply;
+  if (cs) cs.oninput = apply;
+  document.querySelectorAll('#modal tr[data-dest]').forEach(tr => tr.addEventListener('click', () => { if (window.__openDestEvol) navPush(() => window.__openDestEvol(tr.dataset.dest)); }));
+}
 window.__navBack = navBack;
 window.closeModal = closeModal; // para el botón × inline
 
@@ -93,7 +126,7 @@ export function materialesTablaHTML(mats) {
 }
 
 /* línea mensual importe + cantidad */
-export function drawSerie(canvasId, serie, label, monthRange) {
+export function drawSerie(canvasId, serie, label, monthRange, onMonthClick) {
   const cv = document.getElementById(canvasId); if (!cv) return;
   const data = completarSerie(serie || [], monthRange);
   destroyChart(canvasId);
@@ -106,9 +139,15 @@ export function drawSerie(canvasId, serie, label, monthRange) {
     ]},
     options: {
       responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      onClick: onMonthClick ? (evt, els, chart) => {
+        let idx = els && els.length ? els[0].index : null;
+        if (idx == null) { const pts = chart.getElementsAtEventForMode(evt, 'index', { intersect: false }, false); if (pts && pts.length) idx = pts[0].index; }
+        if (idx != null && data[idx]) onMonthClick(data[idx].mes);
+      } : undefined,
+      onHover: onMonthClick ? (e, els) => { e.native.target.style.cursor = els && els.length ? 'pointer' : 'default'; } : undefined,
       plugins: {
         legend: { labels: { color: '#e6edf3' } },
-        tooltip: { callbacks: { label: c => c.dataset.label + ': ' + (c.dataset.label === 'Importe' ? money(c.parsed.y) : fmt(c.parsed.y)) } },
+        tooltip: { callbacks: { label: c => c.dataset.label + ': ' + (c.dataset.label === 'Importe' ? money(c.parsed.y) : fmt(c.parsed.y)) + (onMonthClick ? '  · clic para ver clientes' : '') } },
       },
       scales: {
         x:  { ticks: { color: '#8b98a8' }, grid: { color: '#232c39' } },

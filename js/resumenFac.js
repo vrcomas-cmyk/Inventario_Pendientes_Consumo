@@ -7,8 +7,9 @@ import { store, RFC } from './store.js';
 /* Construye series mensuales por material+destinatario, por solicitante y por
    destinatario. Devuelve también el mes corriente (máximo presente). */
 export function buildRF(rows) {
-  const matDest = new Map(), solic = new Map(), dest = new Map();
+  const matDest = new Map(), solic = new Map(), dest = new Map(), mat = new Map();
   const solicMats = new Map(), destMats = new Map(), matTexto = new Map(), solicRazon = new Map();
+  const matMinYr = new Map();
   let maxk = 0, maxmes = '';
 
   const add = (map, key, mes, c, i) => {
@@ -22,18 +23,27 @@ export function buildRF(rows) {
     add(map.get(k1), k2, mes, c, i);
   };
 
+  // primer recorrido: detectar mes corriente (año corriente)
+  rows.forEach(r => { const mes = norm(r[RFC.mes]); if (!mes) return; const k = mesKey(mes); if (k > maxk) { maxk = k; maxmes = mes; } });
+  const curYear = (maxmes.split('/')[1] || '').trim();
+
   rows.forEach(r => {
     const mes = norm(r[RFC.mes]); if (!mes) return;
-    const k = mesKey(mes); if (k > maxk) { maxk = k; maxmes = mes; }
     const c = num(r[RFC.cant]), i = num(r[RFC.imp]);
-    const d = norm(r[RFC.dest]), s = norm(r[RFC.solic]), mat = norm(r[RFC.material]);
-    add(matDest, d + '||' + mat, mes, c, i);
+    const d = norm(r[RFC.dest]), s = norm(r[RFC.solic]), m = norm(r[RFC.material]);
+    add(matDest, d + '||' + m, mes, c, i);
     add(solic, s, mes, c, i);
     add(dest, d, mes, c, i);
-    add2(solicMats, s, mat, mes, c, i);
-    add2(destMats, d, mat, mes, c, i);
-    if (mat && !matTexto.has(mat)) matTexto.set(mat, norm(r[RFC.texto]));
+    add(mat, m, mes, c, i);
+    add2(solicMats, s, m, mes, c, i);
+    add2(destMats, d, m, mes, c, i);
+    if (m && !matTexto.has(m)) matTexto.set(m, norm(r[RFC.texto]));
     if (s && !solicRazon.has(s)) solicRazon.set(s, norm(r[RFC.razon]));
+    // precio mínimo unitario facturado en el año corriente
+    if (m && c > 0 && (mes.split('/')[1] || '').trim() === curYear) {
+      const u = i / c; const prev = matMinYr.get(m);
+      if (u > 0 && (prev == null || u < prev)) matMinYr.set(m, u);
+    }
   });
 
   const toSerie = mm => [...mm.entries()]
@@ -43,10 +53,27 @@ export function buildRF(rows) {
   const ser2 = map => { const o = new Map(); map.forEach((inner, k) => o.set(k, ser(inner))); return o; };
 
   store.CURMES = maxmes;
+  store.FACROWS = rows;
   return {
-    matDest: ser(matDest), solic: ser(solic), dest: ser(dest),
-    solicMats: ser2(solicMats), destMats: ser2(destMats), matTexto, solicRazon, curmes: maxmes,
+    matDest: ser(matDest), solic: ser(solic), dest: ser(dest), mat: ser(mat),
+    solicMats: ser2(solicMats), destMats: ser2(destMats), matTexto, solicRazon, matMinYr, curmes: maxmes,
   };
+}
+export const serieMaterial = m => store.RF ? (store.RF.mat.get(norm(m)) || []) : [];
+export const precioMinAnioMaterial = m => store.RF ? (store.RF.matMinYr.get(norm(m)) ?? null) : null;
+/* desglose: qué clientes facturaron un material en un mes dado (para clic en tendencia) */
+export function clientesPorMesMaterial(material, mes) {
+  const rows = store.FACROWS || []; const m = norm(material), mk = mesKey(mes);
+  const acc = new Map();
+  for (const r of rows) {
+    if (norm(r[RFC.material]) !== m) continue;
+    if (mesKey(norm(r[RFC.mes])) !== mk) continue;
+    const d = norm(r[RFC.dest]); const key = d;
+    let o = acc.get(key); if (!o) { o = { dest: d, solic: norm(r[RFC.solic]), razon: norm(r[RFC.razon]), centro: norm(r[RFC.centro]), cant: 0, imp: 0 }; acc.set(key, o); }
+    o.cant += num(r[RFC.cant]); o.imp += num(r[RFC.imp]);
+    if (!o.centro) o.centro = norm(r[RFC.centro]);
+  }
+  return [...acc.values()].sort((a, b) => b.imp - a.imp);
 }
 
 /* rankings globales (desde Resumen_Fac) */

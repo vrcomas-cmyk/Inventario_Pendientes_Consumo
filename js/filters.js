@@ -22,7 +22,7 @@ export function passes(row, columns, f) {
   });
 }
 
-export function toolbarHTML(columns, f, extra = '') {
+export function toolbarHTML(columns, f, extra = '', dlId = 'fsugg') {
   const colOpts = columns.map(c => `<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('');
   const chips = f.list.map((flt, i) => {
     const lbl = (columns.find(c => c.key === flt.key) || {}).label || flt.key;
@@ -33,8 +33,8 @@ export function toolbarHTML(columns, f, extra = '') {
     <div class="trow">
       <span class="addf">
         <select data-fcol>${colOpts}</select>
-        <input data-fval list="fsugg" placeholder="valor… (vacío = filtra vacíos)">
-        <datalist id="fsugg"></datalist>
+        <input data-fval list="${esc(dlId)}" placeholder="valor… (vacío = filtra vacíos)">
+        <datalist id="${esc(dlId)}"></datalist>
         <button class="btn" data-fadd>+ filtro</button>
       </span>
       ${f.list.length ? `<button class="btn" data-fclear>Limpiar todo (${f.list.length})</button>` : ''}
@@ -49,21 +49,22 @@ export function wireToolbar(container, f, rerender, onSearch, suggestFn) {
   // El buscador refresca resultados con un pequeño debounce (fluidez con muchos datos)
   if (fs) { let tmr; fs.oninput = e => { f.q = e.target.value; clearTimeout(tmr); tmr = setTimeout(() => (onSearch || rerender)(), 180); }; }
   const colSel = container.querySelector('[data-fcol]');
-  const dl = container.querySelector('#fsugg');
+  const dl = container.querySelector('datalist');
+  const fval = container.querySelector('[data-fval]');
   const fillSugg = () => {
     if (!suggestFn || !dl || !colSel) return;
-    const vals = suggestFn(colSel.value) || [];
+    const vals = suggestFn(colSel.value, fval ? fval.value : '') || [];
     dl.innerHTML = ['(vacíos)', '(con valor)', ...vals].map(v => `<option value="${esc(v)}"></option>`).join('');
   };
   if (colSel) colSel.onchange = fillSugg;
+  if (fval) fval.addEventListener('input', fillSugg);
   fillSugg();
   const add = container.querySelector('[data-fadd]');
   if (add) add.onclick = () => {
     const k = colSel.value;
-    const v = container.querySelector('[data-fval]').value.trim() || '(vacíos)';
+    const v = fval.value.trim() || '(vacíos)';
     f.list.push({ key: k, val: v }); rerender();
   };
-  const fval = container.querySelector('[data-fval]');
   if (fval) fval.onkeydown = e => { if (e.key === 'Enter') add.onclick(); };
   const clr = container.querySelector('[data-fclear]');
   if (clr) clr.onclick = () => { f.list = []; rerender(); };
@@ -134,13 +135,15 @@ export function wirePeriodo(container, flt, curmes, rerender) {
 }
 
 /* genera sugerencias (valores distintos) por columna a partir de las filas */
-export function makeSuggest(rows, columns, limit = 60) {
-  return colKey => {
+export function makeSuggest(rows, columns, limit = 80) {
+  return (colKey, query = '') => {
     const col = columns.find(c => c.key === colKey); if (!col) return [];
+    const q = String(query || '').toLowerCase().trim();
     const set = new Set(); let scanned = 0;
     for (const r of rows) {
-      const v = norm(col.get(r)); if (v) set.add(v);
-      if (++scanned >= 20000 || set.size >= 400) break;
+      const v = norm(col.get(r));
+      if (v && (!q || v.toLowerCase().includes(q))) set.add(v);
+      if (++scanned >= 40000 || set.size >= 600) break;
     }
     return [...set].sort((a, b) => a.localeCompare(b, 'es', { numeric: true })).slice(0, limit);
   };

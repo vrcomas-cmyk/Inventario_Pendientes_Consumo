@@ -4,6 +4,7 @@
 import { esc, norm } from './utils.js';
 import { store } from './store.js';
 import { buildRF } from './resumenFac.js';
+import { buildRSS } from './resumenSin.js';
 import { buildBO } from './sugerencias.js';
 import { openModal, closeModal } from './ui.js';
 import { kvSet, kvGet, kvDel } from './persist.js';
@@ -26,11 +27,12 @@ export function roleOf(headers) {
   if (has('Material base', 'Fuente', 'Pedido')) return 'sug';
   if (has('Mes y año', 'Importe facturado', 'Material')) return 'fac';
   if (has('Consumo_actual', 'Ultimo mes facturacion')) return 'cons';
+  if (has('Cantidad_Pendiente', 'Suma inventario', 'Centro', 'Almacen')) return 'rss';
   if (has('Lote', 'FechaCaducidad', 'CantidadDisp')) return 'lotes';
   if (has('Condicion', 'Material')) return 'cond';
   return null;
 }
-const ROLE_LBL = { sug:'Sugerencias (BO)', fac:'Resumen_Fac', cons:'Reporte de consumo', lotes:'Detalle lotes', cond:'Inventario por condición' };
+const ROLE_LBL = { sug:'Sugerencias (BO)', fac:'Resumen_Fac', cons:'Reporte de consumo', rss:'Resumen Sin Sugerencias', lotes:'Detalle lotes', cond:'Inventario por condición' };
 
 let PENDING = null;
 let onReadyCb = () => {};
@@ -87,6 +89,7 @@ function loadSelected() {
   store.fileName = PENDING.name;
   store.RF = store.ROLE.fac ? buildRF(store.WB[store.ROLE.fac]) : null;
   store.BO = store.ROLE.sug ? buildBO(store.WB[store.ROLE.sug]) : [];
+  if (store.ROLE.rss) buildRSS(store.WB[store.ROLE.rss]);
   // guardar para próximas sesiones (no bloquea la UI)
   if (PENDING.buf) kvSet('file', { name: PENDING.name, selected, buf: PENDING.buf }).catch(() => {});
   closeModal();
@@ -109,6 +112,7 @@ export async function restoreSaved() {
   store.fileName = rec.name;
   store.RF = store.ROLE.fac ? buildRF(store.WB[store.ROLE.fac]) : null;
   store.BO = store.ROLE.sug ? buildBO(store.WB[store.ROLE.sug]) : [];
+  if (store.ROLE.rss) buildRSS(store.WB[store.ROLE.rss]);
   return true;
 }
 export async function forgetSaved() {

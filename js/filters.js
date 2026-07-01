@@ -12,14 +12,21 @@ export const searchText = (row, columns) => columns.map(c => norm(c.get(row))).j
 
 export function passes(row, columns, f) {
   if (!tokenMatch(searchText(row, columns), f.q)) return false;
-  return f.list.every(flt => {
-    const col = columns.find(c => c.key === flt.key);
-    if (!col) return true;
+  // Agrupar por campo: OR dentro del mismo campo, AND entre campos distintos
+  const byKey = new Map();
+  for (const flt of f.list) { if (!byKey.has(flt.key)) byKey.set(flt.key, []); byKey.get(flt.key).push(flt); }
+  for (const [key, flts] of byKey) {
+    const col = columns.find(c => c.key === key);
+    if (!col) continue;
     const v = norm(col.get(row));
-    if (flt.val === '(vacíos)') return v === '';
-    if (flt.val === '(con valor)') return v !== '';
-    return tokenMatch(v, flt.val);
-  });
+    const okAny = flts.some(flt => {
+      if (flt.val === '(vacíos)') return v === '';
+      if (flt.val === '(con valor)') return v !== '';
+      return tokenMatch(v, flt.val);
+    });
+    if (!okAny) return false;
+  }
+  return true;
 }
 
 export function toolbarHTML(columns, f, extra = '', dlId = 'fsugg') {

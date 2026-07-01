@@ -6,7 +6,7 @@
 import { norm, num, fmt, money, esc, mesKey } from './utils.js';
 import { store, RC } from './store.js';
 import { serieMatDest, serieDeConsumo, clasificarEstado, tendenciaTexto, comparativa, aMesAnio, mesLabel,
-         rankingMaterialesAvg12, rankingSolicitantes, ESTADOS } from './resumenFac.js';
+         rankingMaterialesAvg12, rankingSolicitantes, mesRefQAnterior, ESTADOS } from './resumenFac.js';
 import { openModal, drawSerie, pill, trendText, comparativaHTML, rankingHTML, backBtn, navOpen, navPush, openClientesMes } from './ui.js';
 import { openEvol } from './sugerencias.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest, periodoControlHTML, wirePeriodo, dateRange, inRangeMonth } from './filters.js';
@@ -153,11 +153,12 @@ function rankSolicFiltered(list) {
    Para cada solicitante se agrega SU historial de todos los materiales del grupo
    (RF.solicMats) y se clasifica con la lógica trimestral. 1 par = 1 evento. */
 function gruposSolic(list) {
-  if (!store.RF) return { summary: [], detail: new Map() };
+  if (!store.RF) return { summary: [], detail: new Map(), series: new Map() };
   const pairs = new Set();
   for (const r of list) { const s = norm(r[RC.solic]), g = grupoArt(r) || '(sin grupo)'; if (s) pairs.add(s + '\u0001' + g); }
   const cur = mesKey(store.CURMES), lo = cur - 11;
-  const detail = new Map(), gsum = new Map();
+  const refPrev = mesRefQAnterior(store.CURMES);
+  const detail = new Map(), gsum = new Map(), gbucket = new Map();
   pairs.forEach(pk => {
     const i = pk.indexOf('\u0001'), s = pk.slice(0, i), g = pk.slice(i + 1);
     const mats = store.RF.solicMats.get(s); if (!mats) return;
@@ -168,21 +169,30 @@ function gruposSolic(list) {
     });
     if (!bucket.size) return;
     const serie = [...bucket.entries()].map(([mes, v]) => ({ mes, cant: v.cant, imp: v.imp })).sort((a, b) => mesKey(a.mes) - mesKey(b.mes));
-    const st = clasificarEstado(serie, false);
+    const st = clasificarEstado(serie, false);                 // Q corriente
+    const stPrev = clasificarEstado(serie, false, refPrev);    // Q anterior
     let imp12 = 0, cant12 = 0; serie.forEach(x => { const mk = mesKey(x.mes); if (mk >= lo && mk <= cur) { imp12 += x.imp; cant12 += x.cant; } });
     const ult = serie[serie.length - 1];
-    let o = gsum.get(g); if (!o) { o = { grupo: g, nueva: 0, reactiva: 0, imp12: 0, solics: 0 }; gsum.set(g, o); }
+    let o = gsum.get(g); if (!o) { o = { grupo: g, nueva: 0, reactiva: 0, nuevaPrev: 0, reactivaPrev: 0, imp12: 0, solics: 0 }; gsum.set(g, o); }
     if (st.key === 'nueva') o.nueva++; else if (st.key === 'reactiva') o.reactiva++;
+    if (stPrev.key === 'nueva') o.nuevaPrev++; else if (stPrev.key === 'reactiva') o.reactivaPrev++;
     o.imp12 += imp12; o.solics++;
+    // acumular serie del grupo completo (todos los solicitantes)
+    let gb = gbucket.get(g); if (!gb) { gb = new Map(); gbucket.set(g, gb); }
+    serie.forEach(p => { const c = gb.get(p.mes) || { cant: 0, imp: 0 }; c.cant += p.cant; c.imp += p.imp; gb.set(p.mes, c); });
     let drows = detail.get(g); if (!drows) { drows = []; detail.set(g, drows); }
     drows.push({ solic: s, razon: store.RF.solicRazon.get(s) || '', st, imp12, cant12, ult });
   });
   detail.forEach(rows => rows.sort((a, b) => b.imp12 - a.imp12));
-  return { summary: [...gsum.values()].sort((a, b) => (b.nueva + b.reactiva) - (a.nueva + a.reactiva) || b.imp12 - a.imp12), detail };
+  const series = new Map();
+  gbucket.forEach((gb, g) => { series.set(g, [...gb.entries()].map(([mes, v]) => ({ mes, cant: v.cant, imp: v.imp })).sort((a, b) => mesKey(a.mes) - mesKey(b.mes))); });
+  gsum.forEach((o, g) => { o.tnd = tendenciaTexto(series.get(g) || []); });
+  return { summary: [...gsum.values()].sort((a, b) => (b.nueva + b.reactiva) - (a.nueva + a.reactiva) || b.imp12 - a.imp12), detail, series };
 }
 let lastGrupos = { summary: [], detail: new Map() };
 export function openGrupoDetalle(grupo) {
   const rows = lastGrupos.detail.get(grupo) || [];
+  const serie = (lastGrupos.series && lastGrupos.series.get(grupo)) || [];
   const nueva = rows.filter(x => x.st.key === 'nueva').length, react = rows.filter(x => x.st.key === 'reactiva').length;
   const body = rows.map((x, i) => `<tr class="click" data-gs="${i}">
     <td>${esc(x.razon) || '—'}<div class="sub">Solic ${esc(x.solic)}</div></td>
@@ -192,12 +202,16 @@ export function openGrupoDetalle(grupo) {
   openModal(`
     ${backBtn()}<button class="x" onclick="closeModal()">×</button>
     <h2>Grupo de artículo · ${esc(grupo)}</h2>
-    <p class="muted">${rows.length} solicitante(s) · 🆕 ${nueva} nueva compra · 🔁 ${react} reactivación</p>
+    <p class="muted">${rows.length} solicitante(s) · 🆕 ${nueva} nueva compra · 🔁 ${react} reactivación · ${trendText(tendenciaTexto(serie))}</p>
+    <div class="card"><h3>📊 Comparativo — mes corriente vs año anterior · Q corriente vs año anterior</h3>${comparativaHTML(comparativa(serie))}</div>
+    <div class="card"><h3>📈 Evolución mensual — facturación del grupo</h3><div class="chartbox"><canvas id="cGrp"></canvas></div></div>
+    <div class="card"><h3>👥 Solicitantes <span class="hint">clic para ver su facturación</span></h3>
     <input class="mff" data-mf placeholder="🔎 filtrar cliente…">
-    <div class="tablecard"><div class="tbl"><table>
+    <div class="tbl"><table>
       <thead><tr><th>Cliente</th><th>Estado</th><th class="num">Piezas (12m)</th><th class="num">Importe (12m)</th><th>Última compra</th></tr></thead>
       <tbody>${body || '<tr><td colspan="5" class="muted" style="padding:14px;text-align:center">Sin datos.</td></tr>'}</tbody>
     </table></div></div>`);
+  drawSerie('cGrp', serie, 'Facturación del grupo');
   document.querySelectorAll('#modal tr[data-gs]').forEach(tr => tr.addEventListener('click', () => navPush(() => openEvol('solic', rows[+tr.dataset.gs].solic))));
 }
 
@@ -236,6 +250,9 @@ function paint(container) {
   lastGrupos = gruposSolic(list);
   const grSum = lastGrupos.summary;
   const grNueva = grSum.reduce((a, x) => a + x.nueva, 0), grReact = grSum.reduce((a, x) => a + x.reactiva, 0);
+  const grNuevaPrev = grSum.reduce((a, x) => a + x.nuevaPrev, 0), grReactPrev = grSum.reduce((a, x) => a + x.reactivaPrev, 0);
+  const _q = (() => { const [cm, cy] = String(store.CURMES).split('/').map(Number); return 'Q' + (Math.floor((cm - 1) / 3) + 1) + ' ' + cy; })();
+  const qLbl = _q;
 
   const head = [
     th('Cliente (Solic › Razón › Dest)', 'cliente', sort),
@@ -275,13 +292,15 @@ function paint(container) {
       ${comparativaHTML(comparativa(aggSerie(list)))}
     </div>
     <div class="tablecard" style="margin-bottom:12px">
-      <h3>🆕 Nuevas compras y reactivaciones por Grupo de artículo <span class="hint">por solicitante · se ajusta a los filtros · clic en un grupo para ver el detalle</span></h3>
-      <div class="kpis2x2" style="max-width:440px;margin-bottom:8px">
-        <div class="kpi sm"><div class="lbl">Nuevas compras (cliente·grupo)</div><div class="val tnd vio">${fmt(grNueva)}</div></div>
-        <div class="kpi sm"><div class="lbl">Reactivaciones (cliente·grupo)</div><div class="val tnd vio">${fmt(grReact)}</div></div>
+      <h3>🆕 Nuevas compras y reactivaciones por Grupo de artículo <span class="hint">por solicitante · Q corriente = ${esc(qLbl)} · se ajusta a los filtros · clic en un grupo</span></h3>
+      <div class="kpis2x2" style="max-width:640px;margin-bottom:8px;grid-template-columns:repeat(4,1fr)">
+        <div class="kpi sm"><div class="lbl">🆕 Nuevas compras (Q corriente)</div><div class="val tnd vio">${fmt(grNueva)}</div></div>
+        <div class="kpi sm"><div class="lbl">🔁 Reactivaciones (Q corriente)</div><div class="val tnd vio">${fmt(grReact)}</div></div>
+        <div class="kpi sm"><div class="lbl">🆕 Nuevas compras (Q anterior)</div><div class="val">${fmt(grNuevaPrev)}</div></div>
+        <div class="kpi sm"><div class="lbl">🔁 Reactivación (Q anterior)</div><div class="val">${fmt(grReactPrev)}</div></div>
       </div>
-      <div class="tbl"><table><thead><tr><th>Grupo de artículo</th><th class="num">🆕 Nueva compra</th><th class="num">🔁 Reactivación</th><th class="num"># Solicitantes</th><th class="num">Facturación últ. 12 m</th></tr></thead>
-        <tbody>${grSum.filter(x => x.nueva > 0 || x.reactiva > 0).map(x => `<tr class="click" data-grupo="${esc(x.grupo)}"><td><span class="lnk">${esc(x.grupo)}</span></td><td class="num">${x.nueva ? `<b class="tnd vio">${fmt(x.nueva)}</b>` : '—'}</td><td class="num">${x.reactiva ? `<b class="tnd vio">${fmt(x.reactiva)}</b>` : '—'}</td><td class="num">${fmt(x.solics)}</td><td class="num">${money(x.imp12)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted" style="padding:12px;text-align:center">Sin nuevas compras ni reactivaciones en la selección.</td></tr>'}</tbody></table></div>
+      <div class="tbl"><table><thead><tr><th>Grupo de artículo</th><th class="num">🆕 Nueva</th><th class="num">🔁 Reactiva</th><th class="num">🆕 Q ant.</th><th class="num">🔁 Q ant.</th><th>Tendencia</th><th class="num"># Solic.</th><th class="num">Facturación últ. 12 m</th></tr></thead>
+        <tbody>${grSum.filter(x => x.nueva > 0 || x.reactiva > 0 || x.nuevaPrev > 0 || x.reactivaPrev > 0).map(x => `<tr class="click" data-grupo="${esc(x.grupo)}"><td><span class="lnk">${esc(x.grupo)}</span></td><td class="num">${x.nueva ? `<b class="tnd vio">${fmt(x.nueva)}</b>` : '—'}</td><td class="num">${x.reactiva ? `<b class="tnd vio">${fmt(x.reactiva)}</b>` : '—'}</td><td class="num">${x.nuevaPrev ? fmt(x.nuevaPrev) : '—'}</td><td class="num">${x.reactivaPrev ? fmt(x.reactivaPrev) : '—'}</td><td>${trendText(x.tnd)}</td><td class="num">${fmt(x.solics)}</td><td class="num">${money(x.imp12)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted" style="padding:12px;text-align:center">Sin nuevas compras ni reactivaciones en la selección.</td></tr>'}</tbody></table></div>
     </div>
     <div class="tablecard" style="margin-bottom:12px">
       <h3>📈 Evolución mensual — facturación (se ajusta a los filtros)</h3>

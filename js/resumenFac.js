@@ -203,14 +203,14 @@ export function diasDesdeUltimo(serie) {
    - Si no facturó en el Q corriente -> por días: Revisar (90-150) · En riesgo
      (>150) · Sin compra +1 año (>365); reciente -> Al corriente.
    --------------------------------------------------------------------------- */
-export function clasificarEstado(serie, pedido = false) {
+export function clasificarEstado(serie, pedido = false, refMes = store.CURMES) {
   const t = tendencia(serie);
   if (!serie || !serie.length)
     return pedido ? { key: 'nueva', label: 'Nueva compra', cls: 'vio', pct: 0 }
                   : { key: 'nada',  label: 'Sin compra',   cls: 'gris', pct: 0 };
   const months = serie.map(s => mesKey(s.mes)).filter(Boolean).sort((a, b) => a - b);
-  const [cm, cy] = String(store.CURMES).split('/').map(Number);
-  const qStart = cy * 12 + (Math.floor((cm - 1) / 3) * 3 + 1);   // 1er mes del Q corriente
+  const [cm, cy] = String(refMes).split('/').map(Number);
+  const qStart = cy * 12 + (Math.floor((cm - 1) / 3) * 3 + 1);   // 1er mes del Q de referencia
   const qEnd = qStart + 2;
   const yearAgoQStart = qStart - 12;
   const billedCurQ = months.some(k => k >= qStart && k <= qEnd);
@@ -225,6 +225,14 @@ export function clasificarEstado(serie, pedido = false) {
   if (dias > 150) return { key: 'riesgo',   label: 'En riesgo', cls: 'rojo', pct: t.pct, dias };
   if (dias >= 90) return { key: 'revisar',  label: 'Revisar',   cls: 'amb',  pct: t.pct, dias };
   return { key: 'corriente', label: 'Al corriente', cls: 'verde', pct: t.pct, dias };
+}
+/* mm/aaaa del mes anterior al inicio del Q de refMes (para "Q anterior") */
+export function mesRefQAnterior(refMes = store.CURMES) {
+  const [cm, cy] = String(refMes).split('/').map(Number);
+  const qStart = cy * 12 + (Math.floor((cm - 1) / 3) * 3 + 1);
+  const k = qStart - 1;                       // último mes del Q anterior
+  const yy = Math.floor((k - 1) / 12), mm = ((k - 1) % 12) + 1;
+  return String(mm).padStart(2, '0') + '/' + yy;
 }
 
 /* nombres de mes para mostrar mmmm/aaaa */

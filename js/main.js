@@ -5,6 +5,7 @@ import { initUpload, openUploader, restoreSaved, forgetSaved, savedFileName } fr
 import { renderInventario, ensureInvData } from './inventario.js';
 import { renderSug } from './sugerencias.js';
 import { renderConsumo } from './consumo.js';
+import { renderResumenSin } from './resumenSin.js';
 import { openModal, closeModal } from './ui.js';
 import { loadEnrich } from './enrich.js';
 import { isAdmin, login, logout, setPassword, setVisibleTabs, visibleTabs, tabAllowed } from './auth.js';
@@ -13,6 +14,7 @@ const TABS = [
   { id: 'inv',  label: '🏷️ Inventario (condición)' },
   { id: 'sug',  label: '📋 Sugerencias' },
   { id: 'cons', label: '📊 Reporte de consumo' },
+  { id: 'rss',  label: '🏭 Resumen Sin Sugerencias' },
 ];
 
 let current = 'inv';
@@ -31,10 +33,11 @@ function buildTabs() {
 }
 
 function render() {
-  ['inv', 'sug', 'cons'].forEach(id => document.querySelector('#view-' + id).classList.toggle('hidden', id !== current));
+  ['inv', 'sug', 'cons', 'rss'].forEach(id => document.querySelector('#view-' + id).classList.toggle('hidden', id !== current));
   if (current === 'inv')  renderInventario(document.querySelector('#view-inv'));
   if (current === 'sug')  renderSug(document.querySelector('#view-sug'));
   if (current === 'cons') renderConsumo(document.querySelector('#view-cons'));
+  if (current === 'rss')  renderResumenSin(document.querySelector('#view-rss'));
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.id === current));
 }
 function switchTab(id) { current = id; render(); }

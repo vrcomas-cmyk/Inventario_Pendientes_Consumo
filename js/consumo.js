@@ -6,7 +6,7 @@
 import { norm, num, fmt, money, esc, mesKey } from './utils.js';
 import { store, RC } from './store.js';
 import { serieMatDest, serieDeConsumo, clasificarEstado, tendenciaTexto, comparativa, aMesAnio, mesLabel,
-         rankingMaterialesAvg12, rankingSolicitantes, mesRefQAnterior, ESTADOS } from './resumenFac.js';
+         rankingMaterialesAvg12, rankingSolicitantes, mesRefQAnterior, hoyMes, ESTADOS } from './resumenFac.js';
 import { openModal, drawSerie, pill, trendText, comparativaHTML, rankingHTML, backBtn, navOpen, navPush, openClientesMes } from './ui.js';
 import { openEvol } from './sugerencias.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest, periodoControlHTML, wirePeriodo, dateRange, inRangeMonth } from './filters.js';
@@ -157,7 +157,7 @@ function gruposSolic(list) {
   const pairs = new Set();
   for (const r of list) { const s = norm(r[RC.solic]), g = grupoArt(r) || '(sin grupo)'; if (s) pairs.add(s + '\u0001' + g); }
   const cur = mesKey(store.CURMES), lo = cur - 11;
-  const refPrev = mesRefQAnterior(store.CURMES);
+  const refPrev = mesRefQAnterior();
   const detail = new Map(), gsum = new Map(), gbucket = new Map();
   pairs.forEach(pk => {
     const i = pk.indexOf('\u0001'), s = pk.slice(0, i), g = pk.slice(i + 1);
@@ -251,7 +251,8 @@ function paint(container) {
   const grSum = lastGrupos.summary;
   const grNueva = grSum.reduce((a, x) => a + x.nueva, 0), grReact = grSum.reduce((a, x) => a + x.reactiva, 0);
   const grNuevaPrev = grSum.reduce((a, x) => a + x.nuevaPrev, 0), grReactPrev = grSum.reduce((a, x) => a + x.reactivaPrev, 0);
-  const _q = (() => { const [cm, cy] = String(store.CURMES).split('/').map(Number); return 'Q' + (Math.floor((cm - 1) / 3) + 1) + ' ' + cy; })();
+  const refPrev = mesRefQAnterior();
+  const _q = (() => { const [cm, cy] = String(hoyMes()).split('/').map(Number); return 'Q' + (Math.floor((cm - 1) / 3) + 1) + ' ' + cy; })();
   const qLbl = _q;
 
   const head = [

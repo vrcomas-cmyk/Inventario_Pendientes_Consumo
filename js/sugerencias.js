@@ -293,7 +293,7 @@ export function openDetalle(it, fromPedido) {
   openModal(`
     ${backBtn()}<button class="x" onclick="closeModal()">×</button>
     ${cabecera(b)}
-    <p class="muted">Pedido <span class="lnk" id="goped">${esc(b[C.pedido])}</span> · OC ${esc(b[C.oc]) || '—'} · Material ${esc(b[C.matBase])} — ${esc(b[C.descSol])} ${bl ? '· <span class="pill amb">' + esc(bl) + '</span>' : ''}</p>
+    <p class="muted">Pedido <span class="lnk" id="goped">${esc(b[C.pedido])}</span> · OC ${esc(b[C.oc]) || '—'} · Material <span class="lnk" id="goinv">${esc(b[C.matBase])}</span> — ${esc(b[C.descSol])} ${bl ? '· <span class="pill amb">' + esc(bl) + '</span>' : ''} <button class="btn" id="goinv2" style="margin-left:8px">🏷️ Inventario del material</button></p>
     <div class="mkpis">
       <div class="stat"><div class="l">Pendiente</div><div class="v">${fmt(b[C.pend])}</div></div>
       <div class="stat"><div class="l">Precio</div><div class="v">${money(b[C.precio])}</div></div>
@@ -312,6 +312,9 @@ export function openDetalle(it, fromPedido) {
   `);
   drawSerie('cD', it.serie, '');
   document.getElementById('goped')?.addEventListener('click', () => navPush(() => openPedido(b[C.pedido])));
+  const goInv = () => { if (window.__openMaterialInv) window.__openMaterialInv(b[C.matBase]); };
+  document.getElementById('goinv')?.addEventListener('click', goInv);
+  document.getElementById('goinv2')?.addEventListener('click', goInv);
 }
 function matsTableHTML(mats) {
   if (!mats.length) return '<p class="muted">Sin materiales facturados.</p>';

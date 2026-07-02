@@ -239,6 +239,7 @@ function paint(container) {
 
 /* ---- API para otras vistas (Sugerencias) ---- */
 export async function ensureInvData() { if (!loaded && !loading) await load(); return loaded; }
+if (typeof window !== 'undefined') window.__openMaterialInv = mat => ensureInvData().finally(() => navPush(() => showLotes(mat)));
 export function precioInv(material, condText) {
   if (!CONS || !F.material) return null;
   const m = norm(material), ct = norm(condText).toLowerCase();
@@ -260,7 +261,7 @@ export function precioInvMat(material) {
   return num((nuevo || rows[0])[F.precio]);
 }
 
-function showLotes(material, centro, almacen) {
+export function showLotes(material, centro, almacen) {
   const lotes = (DET || []).filter(r => {
     if (norm(r.Material) !== norm(material)) return false;
     if (centro && norm(r.Centro) !== norm(centro)) return false;

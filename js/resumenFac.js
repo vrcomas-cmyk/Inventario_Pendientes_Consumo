@@ -203,7 +203,13 @@ export function diasDesdeUltimo(serie) {
    - Si no facturó en el Q corriente -> por días: Revisar (90-150) · En riesgo
      (>150) · Sin compra +1 año (>365); reciente -> Al corriente.
    --------------------------------------------------------------------------- */
-export function clasificarEstado(serie, pedido = false, refMes = store.CURMES) {
+/* mes real de hoy en formato mm/aaaa (para el cálculo de Q corriente) */
+export function hoyMes() {
+  const d = new Date();
+  return String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+}
+
+export function clasificarEstado(serie, pedido = false, refMes = hoyMes()) {
   const t = tendencia(serie);
   if (!serie || !serie.length)
     return pedido ? { key: 'nueva', label: 'Nueva compra', cls: 'vio', pct: 0 }
@@ -227,7 +233,7 @@ export function clasificarEstado(serie, pedido = false, refMes = store.CURMES) {
   return { key: 'corriente', label: 'Al corriente', cls: 'verde', pct: t.pct, dias };
 }
 /* mm/aaaa del mes anterior al inicio del Q de refMes (para "Q anterior") */
-export function mesRefQAnterior(refMes = store.CURMES) {
+export function mesRefQAnterior(refMes = hoyMes()) {
   const [cm, cy] = String(refMes).split('/').map(Number);
   const qStart = cy * 12 + (Math.floor((cm - 1) / 3) * 3 + 1);
   const k = qStart - 1;                       // último mes del Q anterior

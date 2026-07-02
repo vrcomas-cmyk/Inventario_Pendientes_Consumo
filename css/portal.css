@@ -175,3 +175,5 @@ th.sortable:hover{color:var(--tx)}
 .cmptoggle{display:inline-flex;border:1px solid var(--bd);border-radius:10px;overflow:hidden;margin-bottom:10px}
 .cmptoggle .seg{background:var(--panel2);color:var(--mut);border:none;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600}
 .cmptoggle .seg.on{background:var(--acc);color:#04140a}
+
+.lento{cursor:help;font-size:13px}

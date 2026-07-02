@@ -4,13 +4,15 @@
    del centro (almacenes 1030+1031+1060) + pendiente / en curso como subíndice.
    Clic en la celda → detalle por almacén (inventario, pendiente, tránsito, consumo).
    =========================================================================== */
-import { norm, num, fmt, money, esc } from './utils.js';
-import { store } from './store.js';
-import { openModal, backBtn, pill } from './ui.js';
+import { norm, num, fmt, money, esc, mesKey } from './utils.js';
+import { store, C, RC } from './store.js';
+import { openModal, backBtn, pill, navPush } from './ui.js';
 import { makeFilters, toolbarHTML, wireToolbar, passes, makeSuggest } from './filters.js';
 import { makeSort, cycleSort, applySort, th } from './sort.js';
 import { zoomHTML, wireZoom } from './zoom.js';
 import { exportXlsx, stamp } from './exportx.js';
+import { consumoTableHTML, openConsumoMaterial } from './consumo.js';
+import { openDetalle, openPedido } from './sugerencias.js';
 
 export const RSS = {
   centro: 'Centro', alm: 'Almacen', pedidos: 'Pedidos', material: 'Material', desc: 'Descripcion',
@@ -24,15 +26,17 @@ const ALM_INV = { '1030': 'inv1030', '1031': 'inv1031', '1032': 'inv1032', '1060
 
 let MATS = new Map();     // material -> objeto
 let CENTROS = [];         // lista de centros presentes
+let RSS_CURMES = 0;       // mesKey del mes más reciente de consumo en el archivo
 const flt = makeFilters();
 const sort = makeSort();
 
 export function buildRSS(rows) {
-  const mats = new Map(); const centros = new Set();
+  const mats = new Map(); const centros = new Set(); let curMes = 0;
   for (const r of rows) {
     const m = norm(r[RSS.material]); if (!m) continue;
     const c = norm(r[RSS.centro]); const a = norm(r[RSS.alm]);
     centros.add(c);
+    const uk = mesKey(norm(r[RSS.ultMes])); if (uk > curMes) curMes = uk;
     let mo = mats.get(m);
     if (!mo) { mo = { material: m, desc: norm(r[RSS.desc]), centros: new Map(),
       disp1030: num(r[RSS.disp1030]), disp1032: num(r[RSS.disp1032]), sumaInv: num(r[RSS.sumaInv]), sumaPend: num(r[RSS.sumaPend]) };
@@ -40,10 +44,13 @@ export function buildRSS(rows) {
     let co = mo.centros.get(c);
     if (!co) {
       co = { centro: c, invAlm: { '1030': num(r[RSS.inv1030]), '1031': num(r[RSS.inv1031]), '1032': num(r[RSS.inv1032]), '1060': num(r[RSS.inv1060]) },
-        pend: 0, transito: 0, impPend: 0, pedidos: 0, alm: new Map() };
+        pend: 0, transito: 0, impPend: 0, pedidos: 0, ultMesK: 0, status: new Set(), alm: new Map() };
       mo.centros.set(c, co);
     }
-    co.pend += num(r[RSS.pend]); co.transito += num(r[RSS.transito]); co.impPend += num(r[RSS.impPend]); co.pedidos += num(r[RSS.pedidos]);
+    co.pend += num(r[RSS.pend]); co.transito += num(r[RSS.transito]); co.impPend += num(r[RSS.impPend]);
+    co.pedidos = Math.max(co.pedidos, num(r[RSS.pedidos]));       // "Pedidos" ya viene por centro
+    if (uk > co.ultMesK) co.ultMesK = uk;
+    if (norm(r[RSS.status])) co.status.add(norm(r[RSS.status]));
     const invA = ALM_INV[a] ? co.invAlm[a] : 0;
     co.alm.set(a || '—', { alm: a || '—', inv: invA, pend: num(r[RSS.pend]), transito: num(r[RSS.transito]), impPend: num(r[RSS.impPend]),
       prom: num(r[RSS.prom]), ultMes: norm(r[RSS.ultMes]), cantUlt: num(r[RSS.cantUlt]), penMes: norm(r[RSS.penMes]), cantPen: num(r[RSS.cantPen]),
@@ -51,8 +58,20 @@ export function buildRSS(rows) {
   }
   MATS = mats;
   CENTROS = [...centros].filter(Boolean).sort();
+  RSS_CURMES = curMes;
   return mats;
 }
+
+/* material sin movimiento ≥6 meses y sin pendientes en ese centro, pero con inventario:
+   candidato a reubicar a un centro donde sí se ocupe */
+const MESES_LENTO = 6;
+function esLento(co) {
+  if (!co) return false;
+  if (invGen(co) <= 0 || co.pend > 0) return false;
+  if (!co.ultMesK) return true;                          // nunca se ha movido
+  return (RSS_CURMES - co.ultMesK) >= MESES_LENTO;
+}
+function statusCentro(co) { return co && co.status.size ? [...co.status].join(', ') : ''; }
 
 const invGen = co => co ? (co.invAlm['1030'] + co.invAlm['1031'] + co.invAlm['1060']) : 0;
 
@@ -105,7 +124,7 @@ function paint(container) {
   const totInv = list.reduce((s, r) => s + accessor.inv(r), 0);
   const totTransito = list.reduce((s, r) => s + [...r._mo.centros.values()].reduce((a, co) => a + co.transito, 0), 0);
 
-  const head = `${th('Material', 'material', sort)}${th('Descripción', 'desc', sort)}
+  const head = `${th('Material', 'material', sort)}${th('Descripción', 'desc', sort)}${th('Status Revisión', 'status', sort)}
     ${CENTROS.map(c => `<th class="num">Centro ${esc(c)}</th>`).join('')}
     ${th('Inv. total', 'inv', sort, 'num')}${th('Pend. total', 'pend', sort, 'num')}`;
 
@@ -115,20 +134,23 @@ function paint(container) {
       const co = mo.centros.get(c);
       if (!co) return `<td class="num muted">—</td>`;
       const ig = invGen(co);
-      const sub = (co.pend || co.transito)
-        ? `<div class="sub">${co.pend ? `<span class="tnd down">P ${fmt(co.pend)}</span>` : ''}${co.transito ? ` <span class="tnd amb">C ${fmt(co.transito)}</span>` : ''}</div>`
-        : '';
-      return `<td class="num"><span class="lnk" data-cel="${esc(r.material)}|${esc(c)}">${fmt(ig)}</span>${sub}</td>`;
+      const curso = co.transito ? ` <span class="tnd up" title="En curso / tránsito hacia este centro">+${fmt(co.transito)}</span>` : '';
+      const lento = esLento(co) ? ` <span class="lento" title="Sin movimiento ≥6 meses y sin pendientes en este centro. Con ${fmt(ig)} en inventario: candidato a reubicar a un centro donde sí se ocupe.">⚠️</span>` : '';
+      const sub = co.pend ? `<div class="sub"><span class="tnd down">Pend ${fmt(co.pend)}</span></div>` : '';
+      return `<td class="num"><span class="lnk" data-cel="${esc(r.material)}|${esc(c)}">${fmt(ig)}</span>${curso}${lento}${sub}</td>`;
     }).join('');
     const invTot = [...mo.centros.values()].reduce((s, co) => s + invGen(co), 0);
     const pendTot = [...mo.centros.values()].reduce((s, co) => s + co.pend, 0);
+    const statuses = [...new Set([...mo.centros.values()].flatMap(co => [...co.status]))].filter(Boolean);
     return `<tr>
       <td><span class="lnk" data-mat="${esc(r.material)}">${esc(r.material)}</span></td>
       <td class="muted" style="font-size:11px">${esc(r.desc)}</td>
+      <td>${statuses.length ? statuses.map(s => pill(s, 'amb')).join(' ') : '—'}</td>
       ${cells}
-      <td class="num"><b>${fmt(invTot)}</b></td><td class="num">${pendTot ? `<b class="tnd down">${fmt(pendTot)}</b>` : '—'}</td></tr>`;
+      <td class="num"><b><span class="lnk" data-tot="${esc(r.material)}">${fmt(invTot)}</span></b></td>
+      <td class="num">${pendTot ? `<span class="lnk" data-tot="${esc(r.material)}"><b class="tnd down">${fmt(pendTot)}</b></span>` : '—'}</td></tr>`;
   }).join('');
-  const colspan = 2 + CENTROS.length + 2;
+  const colspan = 3 + CENTROS.length + 2;
 
   container.querySelector('.result').innerHTML = `
     <div class="invtop">
@@ -138,7 +160,7 @@ function paint(container) {
         <div class="kpi sm"><div class="lbl">Pendiente total</div><div class="val tnd down" style="font-size:18px">${fmt(totPend)}</div></div>
         <div class="kpi sm"><div class="lbl">En tránsito total</div><div class="val tnd amb" style="font-size:18px">${fmt(totTransito)}</div></div>
       </div>
-      <p class="muted" style="align-self:center;max-width:360px">Cada celda muestra el inventario general del centro (almacenes 1030+1031+1060). Subíndice: <span class="tnd down">P</span> pendiente · <span class="tnd amb">C</span> en curso. Clic para ver el detalle por almacén.</p>
+      <p class="muted" style="align-self:center;max-width:380px">Cada celda: inventario general del centro (1030+1031+1060) · <span class="tnd up">+N</span> en curso (tránsito) · <span class="tnd down">Pend</span> pendiente · <span class="lento">⚠️</span> sin movimiento ≥6 meses y sin pendientes (reubicable). Clic en el inventario = sugerencias y consumo de ese centro; clic en Inv/Pend total = totales del material.</p>
     </div>
     <div class="tablecard">
       <h3>🏭 Resumen por centro/almacén (sin sugerencias) <span class="hint">material en filas · centros en columnas</span></h3>
@@ -150,13 +172,41 @@ function paint(container) {
 
   wireZoom(container, 'rss', '.result .tbl table');
   container.querySelectorAll('.result [data-cel]').forEach(el => el.addEventListener('click', () => { const [m, c] = el.dataset.cel.split('|'); openCeldaDetalle(m, c); }));
+  container.querySelectorAll('.result [data-tot]').forEach(el => el.addEventListener('click', ev => { ev.stopPropagation(); openMaterialTotales(el.dataset.tot); }));
   container.querySelectorAll('.result [data-mat]').forEach(el => el.addEventListener('click', () => openMaterialRSS(el.dataset.mat)));
+}
+
+/* sugerencias (BO) y consumo (RC) para material [+ centro] */
+function sugFor(material, centro) {
+  const m = norm(material), c = centro ? norm(centro) : null;
+  return (store.BO || []).filter(it => norm(it.bo[C.matBase]) === m && (!c || norm(it.bo[C.centro]) === c));
+}
+function consFor(material, centro) {
+  const cons = (store.ROLE && store.ROLE.cons) ? (store.WB[store.ROLE.cons] || []) : [];
+  const m = norm(material), c = centro ? norm(centro) : null;
+  return cons.filter(r => norm(r[RC.material]) === m && (!c || norm(r[RC.centro]) === c));
+}
+function sugTableHTML(list) {
+  if (!list.length) return '<p class="muted">Sin pedidos de sugerencias.</p>';
+  const rows = list.map((it, i) => { const b = it.bo; return `<tr class="click" data-sug="${i}">
+    <td><span class="lnk" data-sped="${esc(b[C.pedido])}"><b>${esc(b[C.pedido])}</b></span><div class="sub">OC ${esc(b[C.oc]) || '—'}</div></td>
+    <td>${esc(b[C.centro])}${norm(b[C.alm]) ? ' / ' + esc(b[C.alm]) : ''}</td>
+    <td>${esc(b[C.razon])}<div class="sub">Solic ${esc(b[C.solic])} · Dest ${esc(b[C.dest])}</div></td>
+    <td class="num">${fmt(b[C.pend])}</td><td class="num">${money(b[C.precio])}</td>
+    <td>${pill(it.status.label, it.status.cls)}</td></tr>`; }).join('');
+  return `<div class="tbl"><table><thead><tr><th>Pedido/OC</th><th>Centro/Alm</th><th>Cliente</th><th class="num">Pendiente</th><th class="num">Precio</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function wireSugCons(sug, cons) {
+  document.querySelectorAll('#modal tr[data-sug]').forEach(tr => tr.addEventListener('click', () => navPush(() => openDetalle(sug[+tr.dataset.sug]))));
+  document.querySelectorAll('#modal [data-sped]').forEach(el => el.addEventListener('click', ev => { ev.stopPropagation(); navPush(() => openPedido(el.dataset.sped)); }));
+  document.querySelectorAll('#modal tr[data-cmi]').forEach(tr => tr.addEventListener('click', () => navPush(() => openConsumoMaterial(cons[+tr.dataset.cmi]))));
 }
 
 /* detalle de una celda (material × centro) desglosado por almacén */
 export function openCeldaDetalle(material, centro) {
   const mo = MATS.get(norm(material)); if (!mo) return;
   const co = mo.centros.get(norm(centro)); if (!co) return;
+  const sug = sugFor(material, centro), cons = consFor(material, centro);
   const alms = [...co.alm.values()].sort((a, b) => String(a.alm).localeCompare(String(b.alm)));
   const body = alms.map(a => `<tr>
     <td>${esc(a.alm)}</td>
@@ -183,7 +233,30 @@ export function openCeldaDetalle(material, centro) {
       <thead><tr><th>Almacén</th><th class="num">Inventario</th><th class="num">Pendiente</th><th class="num">En tránsito</th><th class="num">Importe pend.</th><th class="num">Consumo prom.</th><th>Último mes</th><th>Penúltimo mes</th><th class="num">Meses inv.</th><th>Status</th><th>Fuente</th></tr></thead>
       <tbody>${body || '<tr><td colspan="11" class="muted" style="padding:14px;text-align:center">Sin almacenes.</td></tr>'}</tbody>
     </table></div></div>
-    <p class="muted" style="font-size:12px">Dispersión (planta 1031): almacén 1030 = <b>${fmt(mo.disp1030)}</b> · almacén 1032 = <b>${fmt(mo.disp1032)}</b>. Suturas salen del centro 1018.</p>`);
+    <p class="muted" style="font-size:12px">Dispersión (planta 1031): almacén 1030 = <b>${fmt(mo.disp1030)}</b> · almacén 1032 = <b>${fmt(mo.disp1032)}</b>. Suturas salen del centro 1018.</p>
+    <div class="card"><h3>📋 Sugerencias en este centro <span class="hint">clic para ver el detalle / pedido</span></h3>${sugTableHTML(sug)}</div>
+    <div class="card"><h3>📊 Consumo en este centro</h3>${cons.length ? consumoTableHTML(cons) : '<p class="muted">Sin facturación de consumo.</p>'}</div>`);
+  wireSugCons(sug, cons);
+}
+
+/* totales del material: sugerencias + consumo de todos los centros */
+export function openMaterialTotales(material) {
+  const mo = MATS.get(norm(material)); if (!mo) return;
+  const sug = sugFor(material, null), cons = consFor(material, null);
+  const pendTot = sug.reduce((s, it) => s + num(it.bo[C.pend]), 0);
+  const impTot = sug.reduce((s, it) => s + num(it.bo[C.pend]) * num(it.bo[C.precio]), 0);
+  openModal(`${backBtn()}<button class="x" onclick="closeModal()">×</button>
+    <h2>${esc(material)} · Totales</h2>
+    <p class="muted">${esc(mo.desc)}</p>
+    <div class="consu" style="margin-bottom:8px">
+      <div class="b"><div class="t">Inventario global</div><div class="m">${fmt(mo.sumaInv)}</div></div>
+      <div class="b"><div class="t">Pendiente global</div><div class="m tnd down">${fmt(mo.sumaPend)}</div></div>
+      <div class="b"><div class="t">Sugerencias</div><div class="m">${fmt(sug.length)}</div></div>
+      <div class="b"><div class="t">Clientes en consumo</div><div class="m">${fmt(cons.length)}</div></div>
+    </div>
+    <div class="card"><h3>📋 Todas las sugerencias del material <span class="hint">clic para ver detalle / pedido</span></h3>${sugTableHTML(sug)}</div>
+    <div class="card"><h3>📊 Todo el consumo del material</h3>${cons.length ? consumoTableHTML(cons) : '<p class="muted">Sin facturación de consumo.</p>'}</div>`);
+  wireSugCons(sug, cons);
 }
 
 /* detalle del material en todos los centros */

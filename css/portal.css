@@ -177,3 +177,11 @@ th.sortable:hover{color:var(--tx)}
 .cmptoggle .seg.on{background:var(--acc);color:#04140a}
 
 .lento{cursor:help;font-size:13px}
+
+.bcrumb{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.ctrail{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--mut);flex-wrap:wrap}
+.crumb{cursor:pointer;color:#4da3ff}
+.crumb:hover{text-decoration:underline}
+.crumb.cur{cursor:default;color:var(--mut)}
+.crumb.cur:hover{text-decoration:none}
+.csep{color:var(--mut);opacity:.6}

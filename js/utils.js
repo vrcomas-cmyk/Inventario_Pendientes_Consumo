@@ -11,6 +11,7 @@ export const num = v => {
 
 export const fmt   = n => Math.round(num(n)).toLocaleString('es-MX');
 export const money = n => num(n).toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
+export const moneyD = n => num(n).toLocaleString('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
 export const esc = s => norm(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
@@ -53,3 +54,6 @@ export function vigencia(fecha) {
   else { txt = `${meses.toFixed(1)} meses`; cls = 'verde'; }
   return { dias, meses, txt, cls };
 }
+
+/* primer campo no vacío entre varios encabezados candidatos */
+export const pickField = (r, names) => { for (const n of names) { const v = norm(r[n]); if (v) return v; } return ''; };

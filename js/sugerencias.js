@@ -1,14 +1,14 @@
 /* ===========================================================================
    sugerencias.js · "Todas las Sugerencias" (BO) — v4
    =========================================================================== */
-import { norm, num, fmt, money, esc, vigencia } from './utils.js';
+import { norm, num, fmt, money, esc, vigencia, moneyD } from './utils.js';
 import { store, C } from './store.js';
 import { serieMatDest, serieSolic, serieDest, consumoDe, clasificarEstado,
-         tendenciaTexto, comparativa, materialesDe, mesLabel, aMesAnio } from './resumenFac.js';
+         tendenciaTexto, materialesDe, mesLabel, aMesAnio } from './resumenFac.js';
 import { ESTADOS } from './resumenFac.js';
 import { openModal, drawSerie, pill, trendText, invGrid, rankingHTML,
-         comparativaHTML, materialesTablaHTML, backBtn, navOpen, navPush, openClientesMes } from './ui.js';
-import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest, periodoControlHTML, wirePeriodo, dateRange, inRangeDay } from './filters.js';
+         backBtn, navOpen, navPush, openClientesMes, comparativaDualHTML } from './ui.js';
+import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest, periodoControlHTML, wirePeriodo, dateRange, inRangeDay, wireAddfClicks } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
 import { makeSort, cycleSort, applySort, th } from './sort.js';
 import { exportXlsx, stamp } from './exportx.js';
@@ -138,19 +138,19 @@ function paint(container) {
   const rows = list.map(it => {
     const b = it.bo, bl = bloqDe(b), cen = `${esc(b[C.centro])}${norm(b[C.alm]) ? ' / ' + esc(b[C.alm]) : ''}`;
     return `<tr class="click ${bl ? 'bloq' : ''}" data-k="${esc(it.k)}">
-      <td><div>${esc(grupoCli(b))}</div><div class="sub">${esc(normCode(b[C.gpo]))}</div></td>
+      <td><div>${grupoCli(b) ? `<span class="lnk" data-addf="grupocli|${esc(grupoCli(b))}" title="Filtrar por este grupo">${esc(grupoCli(b))}</span>` : '—'}</div><div class="sub">${esc(normCode(b[C.gpo]))}</div></td>
       <td><span class="lnk" data-ev="ped" data-key="${esc(b[C.pedido])}"><b>${esc(b[C.pedido])}</b></span><div class="sub">OC ${esc(b[C.oc]) || '—'}</div></td>
       <td>${esc(b[C.fecha])}</td>
       <td><div>${esc(b[C.razon])}</div>
         <div style="font-size:11px;margin-top:2px">
           <span class="lnk" data-ev="solic" data-key="${esc(b[C.solic])}">Solic ${esc(b[C.solic])}</span> ·
           <span class="lnk" data-ev="dest"  data-key="${esc(b[C.dest])}">Dest ${esc(b[C.dest])}</span></div></td>
-      <td>${esc(ejecDe(b)) || '—'}</td>
+      <td>${ejecDe(b) ? `<span class="lnk" data-addf="ejecutivo|${esc(ejecDe(b))}" title="Filtrar por este ejecutivo">${esc(ejecDe(b))}</span>` : '—'}</td>
       <td>${cen}</td>
       <td><span class="lnk" data-ev="det">${esc(b[C.matBase])}</span><div class="sub">${esc(b[C.descSol])}</div></td>
       <td>${esc(sectorDe(b)) || '—'}<div class="sub">${esc(grupoArt(b)) || ''}</div></td>
       <td class="num">${fmt(b[C.cantPed])}</td><td class="num">${fmt(b[C.pend])}</td>
-      <td class="num">${money(b[C.precio])}</td><td class="num">${fmt(it.consumoProm)}</td>
+      <td class="num">${moneyD(b[C.precio])}</td><td class="num">${fmt(it.consumoProm)}</td>
       ${invCell(b[C.inv1030], b[C.tr1030])}${invCell(b[C.inv1031], b[C.tr1031])}
       ${invCell(b[C.inv1032], b[C.tr1032])}${invCell(b[C.inv1060], 0)}
       <td>${bl ? `<span class="pill amb">${esc(bl)}</span>` : '—'}</td>
@@ -191,6 +191,7 @@ function paint(container) {
   container.querySelectorAll('.result th.sortable').forEach(thEl => thEl.addEventListener('click', e => {
     sort = cycleSort(sort, thEl.dataset.sort, e.shiftKey); paint(container);
   }));
+  wireAddfClicks(container, flt, () => renderSug(container));
   container.querySelectorAll('.result [data-ev]').forEach(el => el.addEventListener('click', ev => {
     ev.stopPropagation();
     const kind = el.dataset.ev;
@@ -249,8 +250,8 @@ export function openPedido(pedido) {
   const rows = items.map((it, i) => {
     const b = it.bo, bl = bloqDe(b);
     return `<tr class="click ${bl ? 'bloq' : ''}" data-pi="${i}">
-      <td><span class="lnk">${esc(b[C.matBase])}</span></td><td>${esc(b[C.descSol])}</td>
-      <td class="num">${fmt(b[C.cantPed])}</td><td class="num">${fmt(b[C.pend])}</td><td class="num">${money(b[C.precio])}</td>
+      <td><span class="lnk">${esc(b[C.matBase])}</span> <span class="lnk" data-goinv="${esc(b[C.matBase])}" title="Inventario del material">🏷️</span></td><td>${esc(b[C.descSol])}</td>
+      <td class="num">${fmt(b[C.cantPed])}</td><td class="num">${fmt(b[C.pend])}</td><td class="num">${moneyD(b[C.precio])}</td>
       <td class="num">${it.fuentes.length || '—'}</td>
       <td>${bl ? `<span class="pill amb">${esc(bl)}</span>` : '—'}</td>
       <td>${pill(it.status.label, it.status.cls)}</td><td>${trendText(it.tend)}</td></tr>`;
@@ -284,7 +285,7 @@ export function openDetalle(it, fromPedido) {
         it.fuentes.map(f => {
           const pInv = precioInv(f[C.matSug], f[C.fuente]);
           const vg = vigencia(f[C.cad]);
-          return `<tr><td>${pill(norm(f[C.fuente]), /[Cc]orta/.test(norm(f[C.fuente])) ? 'rojo' : 'azul')}</td><td>${esc(f[C.matSug])}</td><td>${esc(f[C.descSug])}</td><td>${esc(f[C.cenSug])}${norm(f[C.almSug]) ? ' / ' + esc(f[C.almSug]) : ''}</td><td class="num">${fmt(f[C.disp])}</td><td class="num">${pInv != null ? money(pInv) : '—'}</td><td>${esc(f[C.lote])}</td><td>${esc(f[C.cad]) || '—'}${vg ? `<div class="vig ${vg.cls}">${vg.txt}</div>` : ''}</td></tr>`;
+          return `<tr><td>${pill(norm(f[C.fuente]), /[Cc]orta/.test(norm(f[C.fuente])) ? 'rojo' : 'azul')}</td><td><span class="lnk" data-goinv="${esc(f[C.matSug])}">${esc(f[C.matSug])}</span></td><td>${esc(f[C.descSug])}</td><td>${esc(f[C.cenSug])}${norm(f[C.almSug]) ? ' / ' + esc(f[C.almSug]) : ''}</td><td class="num">${fmt(f[C.disp])}</td><td class="num">${pInv != null ? moneyD(pInv) : '—'}</td><td>${esc(f[C.lote])}</td><td>${esc(f[C.cad]) || '—'}${vg ? `<div class="vig ${vg.cls}">${vg.txt}</div>` : ''}</td></tr>`;
         }).join('')
       }</tbody></table></div>`
     : '<p class="muted">Este BO no tiene fuentes asociadas.</p>';
@@ -296,13 +297,13 @@ export function openDetalle(it, fromPedido) {
     <p class="muted">Pedido <span class="lnk" id="goped">${esc(b[C.pedido])}</span> · OC ${esc(b[C.oc]) || '—'} · Material <span class="lnk" id="goinv">${esc(b[C.matBase])}</span> — ${esc(b[C.descSol])} ${bl ? '· <span class="pill amb">' + esc(bl) + '</span>' : ''} <button class="btn" id="goinv2" style="margin-left:8px">🏷️ Inventario del material</button></p>
     <div class="mkpis">
       <div class="stat"><div class="l">Pendiente</div><div class="v">${fmt(b[C.pend])}</div></div>
-      <div class="stat"><div class="l">Precio</div><div class="v">${money(b[C.precio])}</div></div>
+      <div class="stat"><div class="l">Precio</div><div class="v">${moneyD(b[C.precio])}</div></div>
       <div class="stat"><div class="l">Estado</div><div class="v" style="font-size:14px">${pill(it.status.label, it.status.cls)}</div></div>
       <div class="stat"><div class="l">Tendencia</div><div class="v" style="font-size:14px">${trendText(it.tend)}</div></div>
       <div class="stat"><div class="l">Ejecutivo</div><div class="v" style="font-size:13px">${esc(ejecDe(b)) || '—'}</div></div>
     </div>
     <div class="card"><h3>💵 Consumo / facturación</h3>${consumoHTML(it.cons, it.status)}</div>
-    ${store.RF ? `<div class="card"><h3>📊 Comparativo anual</h3>${comparativaHTML(comparativa(it.serie))}</div>` : ''}
+    ${store.RF ? `<div class="card"><h3>📊 Comparativo anual</h3>${comparativaDualHTML(it.serie)}</div>` : ''}
     <div class="card"><h3>📈 Evolución mensual — material + destinatario</h3><div class="chartbox"><canvas id="cD"></canvas></div></div>
     <div class="card"><h3>🔀 Fuentes / materiales ofertables (${it.fuentes.length})</h3><input class="mff" data-mf placeholder="🔎 filtrar fuentes…">${fz}</div>
     <div class="card"><h3>📦 Inventario principales</h3>${invGrid(invPrincipales)}
@@ -319,7 +320,7 @@ export function openDetalle(it, fromPedido) {
 function matsTableHTML(mats) {
   if (!mats.length) return '<p class="muted">Sin materiales facturados.</p>';
   const rows = mats.map(m => `<tr class="click" data-mat="${esc(m.material)}" data-sector="${esc(m.sector)}" data-grupo="${esc(m.grupo)}">
-    <td><span class="lnk">${esc(m.material)}</span></td><td>${esc(m.texto)}</td>
+    <td><span class="lnk">${esc(m.material)}</span> <span class="lnk" data-goinv="${esc(m.material)}" title="Inventario del material">🏷️</span></td><td>${esc(m.texto)}</td>
     <td>${esc(m.sector) || '—'}</td><td>${esc(m.grupo) || '—'}</td>
     <td>${m.ultimo ? esc(mesLabel(m.ultimo.mes)) : '—'}</td>
     <td class="num">${m.ultimo ? money(m.ultimo.imp) : '—'}</td>
@@ -335,15 +336,13 @@ function openCodigoEvol(kind, key, material) {
   openModal(`${backBtn()}<button class="x" onclick="closeModal()">×</button>
     <h2>${esc(material)} · ${esc(texto)}</h2>
     <p class="muted">${kind === 'solic' ? 'Solicitante' : 'Destinatario'} ${esc(key)} · comportamiento del material</p>
-    <div class="card"><h3>📊 Comparativo anual</h3>${comparativaHTML(comparativa(serie))}</div>
+    <div class="card"><h3>📊 Comparativo anual</h3>${comparativaDualHTML(serie)}</div>
     <div class="card"><h3>📈 Evolución mensual <span class="hint">clic en un mes = clientes de ese material</span></h3><div class="chartbox"><canvas id="cCod"></canvas></div></div>`);
   drawSerie('cCod', serie, 'Importe', undefined, mes => navPush(() => openClientesMes(material, mes)));
 }
 
 export function openEvol(kind, key) {
   if (!store.RF) { alert('No hay Resumen_Fac cargado.'); return; }
-  window.__openDestEvol = d => openEvol('dest', d);
-  window.__openDestEvol = d => openEvol('dest', d);
   const serie = kind === 'solic' ? serieSolic(key) : serieDest(key);
   const titulo = kind === 'solic' ? 'Facturación general del Solicitante' : 'Facturación general del Destinatario';
   const mats = materialesDe(kind, key).map(m => ({ ...m, sector: matSector(m.material) || '', grupo: matGrupo(m.material) || '' }));
@@ -374,7 +373,7 @@ export function openEvol(kind, key) {
     ${backBtn()}<button class="x" onclick="closeModal()">×</button>
     <h2>${titulo}</h2>
     <p class="muted">${kind === 'solic' ? 'Solicitante' : 'Destinatario'}: ${esc(key)} · ${mats.length} material(es) facturado(s)</p>
-    <div class="card"><h3>📊 Comparativo anual <span class="hint">refleja el filtro de abajo</span></h3><div id="cmpWrap">${comparativaHTML(comparativa(serie))}</div></div>
+    <div class="card"><h3>📊 Comparativo anual <span class="hint">refleja el filtro de abajo</span></h3><div id="cmpWrap">${comparativaDualHTML(serie)}</div></div>
     <div class="card"><h3>📈 Evolución mensual — Importe facturado <span class="hint">refleja el filtro de abajo</span></h3><div class="chartbox"><canvas id="cG"></canvas></div></div>
     ${destCard}
     <div class="card"><h3>🧾 Códigos facturados y su tendencia <span class="hint">clic en un material para ver su comportamiento</span></h3>${filtBar}${matsTableHTML(mats)}</div>`);
@@ -394,7 +393,7 @@ export function openEvol(kind, key) {
     const bk = new Map();
     mats.forEach(m => { if (!ok.has(m.material)) return; m.serie.forEach(p => { const c = bk.get(p.mes) || { cant: 0, imp: 0 }; c.cant += p.cant; c.imp += p.imp; bk.set(p.mes, c); }); });
     const agg = [...bk.entries()].map(([mes, v]) => ({ mes, cant: v.cant, imp: v.imp })).sort((a, b) => mKey(a.mes) - mKey(b.mes));
-    const w = document.querySelector('#modal #cmpWrap'); if (w) w.innerHTML = comparativaHTML(comparativa(agg));
+    const w = document.querySelector('#modal #cmpWrap'); if (w) w.innerHTML = comparativaDualHTML(agg);
     drawSerie('cG', agg, titulo);
   };
   if (fsec) fsec.onchange = recompute; if (fgru) fgru.onchange = recompute; if (mf) mf.oninput = recompute;
@@ -402,4 +401,8 @@ export function openEvol(kind, key) {
   document.querySelectorAll('#modal tr[data-mat]').forEach(tr => tr.addEventListener('click', () => navPush(() => openCodigoEvol(kind, key, tr.dataset.mat))));
 }
 
-if (typeof window !== "undefined") window.__openDestEvol = d => openEvol("dest", d);
+if (typeof window !== 'undefined') {
+  window.__openDestEvol = d => navPush(() => openEvol('dest', d));
+  window.__openSolicEvol = s2 => navPush(() => openEvol('solic', s2));
+  window.__openPedidoG = p => navPush(() => openPedido(p));
+}

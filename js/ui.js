@@ -2,7 +2,7 @@
    ui.js · modal, gráficas y pequeños renderers compartidos
    =========================================================================== */
 import { esc, fmt, money, norm } from './utils.js';
-import { mesLabel, completarSerie, aMesAnio, clientesPorMesMaterial } from './resumenFac.js';
+import { mesLabel, completarSerie, aMesAnio, clientesPorMesMaterial, comparativa, hoyMes, mesAnterior } from './resumenFac.js';
 
 let chartRef = null;
 const charts = {};
@@ -21,6 +21,74 @@ export function openModal(html) {
       tbl.querySelectorAll('tbody tr').forEach(tr => { tr.style.display = (!q || tr.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
     });
   });
+  makeModalTablesSortable(m);
+  wireDrillLinks(m);
+}
+
+/* Enlaces de drill universales: cualquier tabla/modal puede emitir
+   data-goinv (material→inventario), data-gosolic / data-godest (cliente→facturación),
+   data-goped (pedido→detalle), data-gorss (material|centro→Resumen Sin Sugerencias). */
+export function wireDrillLinks(root) {
+  const bind = (sel, fn) => (root || document).querySelectorAll(sel).forEach(el => el.addEventListener('click', ev => { ev.stopPropagation(); fn(el); }));
+  bind('[data-goinv]',   el => window.__openMaterialInv && window.__openMaterialInv(el.dataset.goinv));
+  bind('[data-gosolic]', el => window.__openSolicEvol && window.__openSolicEvol(el.dataset.gosolic));
+  bind('[data-godest]',  el => window.__openDestEvol && window.__openDestEvol(el.dataset.godest));
+  bind('[data-goped]',   el => window.__openPedidoG && window.__openPedidoG(el.dataset.goped));
+  bind('[data-gorss]',   el => { const [m, c] = el.dataset.gorss.split('|'); window.__openRSSCelda && window.__openRSSCelda(m, c); });
+}
+
+/* Toggle segmentado 📋/📊 dentro del modal: botones .seg[data-view] muestran su [data-pane] */
+export function wireSegToggle() {
+  const panes = {};
+  document.querySelectorAll('#modal [data-pane]').forEach(p => { panes[p.dataset.pane] = p; });
+  document.querySelectorAll('#modal .segm .seg').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('#modal .segm .seg').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    const v = btn.dataset.view;
+    Object.entries(panes).forEach(([k, p]) => { p.style.display = k === v ? '' : 'none'; });
+  }));
+}
+
+/* Hace ordenables (clic en encabezado) todas las tablas dentro de un modal.
+   Detecta números, importes y meses (Junio/2026, 06/2026). Alterna asc/desc. */
+function sortKey(td) {
+  if (td.dataset && td.dataset.sort !== undefined && td.dataset.sort !== '') {
+    const n = Number(td.dataset.sort); return isNaN(n) ? td.dataset.sort.toLowerCase() : n;
+  }
+  const t = (td.textContent || '').trim();
+  const meses = { enero:1, febrero:2, marzo:3, abril:4, mayo:5, junio:6, julio:7, agosto:8, septiembre:9, octubre:10, noviembre:11, diciembre:12 };
+  let mm = t.toLowerCase().match(/^([a-záéíóú]+)\/(\d{4})/);
+  if (mm && meses[mm[1]]) return Number(mm[2]) * 12 + meses[mm[1]];
+  mm = t.match(/^(\d{1,2})\/(\d{4})$/);
+  if (mm) return Number(mm[2]) * 12 + Number(mm[1]);
+  mm = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (mm) return Number(mm[3].length === 2 ? '20' + mm[3] : mm[3]) * 10000 + Number(mm[2]) * 100 + Number(mm[1]);
+  const num = t.replace(/[^0-9.\-]/g, '');
+  if (num !== '' && !isNaN(Number(num)) && /\d/.test(t)) return Number(num);
+  return t.toLowerCase();
+}
+export function makeModalTablesSortable(root) {
+  (root || document).querySelectorAll('table').forEach(tbl => {
+    const thead = tbl.tHead; const tbody = tbl.tBodies[0];
+    if (!thead || !tbody) return;
+    const ths = thead.rows.length ? thead.rows[thead.rows.length - 1].cells : [];
+    Array.from(ths).forEach((thEl, i) => {
+      if (thEl.dataset.noSort !== undefined) return;
+      thEl.style.cursor = 'pointer'; thEl.title = 'Ordenar';
+      thEl.addEventListener('click', () => {
+        const asc = thEl.dataset.dir !== 'asc';
+        Array.from(ths).forEach(x => { delete x.dataset.dir; x.querySelectorAll('.sortcaret').forEach(c => c.remove()); });
+        thEl.dataset.dir = asc ? 'asc' : 'desc';
+        const car = document.createElement('span'); car.className = 'sortcaret'; car.textContent = asc ? ' ▲' : ' ▼'; thEl.appendChild(car);
+        const rows = Array.from(tbody.rows).filter(r => !r.querySelector('td[colspan]'));
+        rows.sort((ra, rb) => {
+          const a = sortKey(ra.cells[i] || {}), b = sortKey(rb.cells[i] || {});
+          if (a < b) return asc ? -1 : 1; if (a > b) return asc ? 1 : -1; return 0;
+        });
+        rows.forEach(r => tbody.appendChild(r));
+      });
+    });
+  });
 }
 export function closeModal() {
   document.querySelector('#ov').classList.remove('show');
@@ -29,12 +97,23 @@ export function closeModal() {
 }
 export function destroyChart(id) { if (charts[id]) { try { charts[id].destroy(); } catch (e) {} delete charts[id]; } }
 
-/* navegación entre detalles: cada "thunk" reabre su modal */
-export function navOpen(thunk) { navStack = [thunk]; thunk(); }          // detalle de primer nivel (sin volver)
-export function navPush(thunk) { navStack.push(thunk); thunk(); }        // detalle anidado (con volver)
-export function navBack() { navStack.pop(); const p = navStack[navStack.length - 1]; if (p) p(); else closeModal(); }
+/* navegación entre detalles: cada nivel guarda su thunk + etiqueta (título del modal) */
+function captureLabel() {
+  const top = navStack[navStack.length - 1]; if (!top) return;
+  const h = document.querySelector('#modal h2');
+  top.label = (h ? h.textContent : '').trim().slice(0, 60) || 'Detalle';
+}
+export function navOpen(thunk) { navStack = [{ t: thunk }]; thunk(); captureLabel(); }   // primer nivel
+export function navPush(thunk) { navStack.push({ t: thunk }); thunk(); captureLabel(); } // anidado
+export function navBack() { navStack.pop(); const p = navStack[navStack.length - 1]; if (p) { p.t(); captureLabel(); } else closeModal(); }
+export function navTo(i) { if (i < 0 || i >= navStack.length - 1) return; navStack = navStack.slice(0, i + 1); const p = navStack[i]; p.t(); captureLabel(); }
 export function navCanBack() { return navStack.length > 1; }
-export function backBtn() { return navCanBack() ? `<button class="btn" style="float:left;margin-right:10px" onclick="window.__navBack()">← Volver</button>` : ''; }
+export function backBtn() {
+  if (!navCanBack()) return '';
+  const crumbs = navStack.slice(0, -1).map((x, i) =>
+    `<span class="crumb" onclick="window.__navTo(${i})" title="Ir a este nivel">${esc(x.label || 'Detalle')}</span>`).join('<span class="csep">›</span>');
+  return `<div class="bcrumb"><button class="btn" onclick="window.__navBack()">← Volver</button><span class="ctrail">${crumbs}<span class="csep">›</span><span class="crumb cur">aquí</span></span></div>`;
+}
 
 /* clic en un mes de cualquier tendencia de material → clientes que facturaron ese mes, con filtro por centro */
 export function openClientesMes(material, mes) {
@@ -66,9 +145,10 @@ export function openClientesMes(material, mes) {
   };
   if (cf) cf.onchange = apply;
   if (cs) cs.oninput = apply;
-  document.querySelectorAll('#modal tr[data-dest]').forEach(tr => tr.addEventListener('click', () => { if (window.__openDestEvol) navPush(() => window.__openDestEvol(tr.dataset.dest)); }));
+  document.querySelectorAll('#modal tr[data-dest]').forEach(tr => tr.addEventListener('click', () => { if (window.__openDestEvol) window.__openDestEvol(tr.dataset.dest); }));
 }
 window.__navBack = navBack;
+window.__navTo = navTo;
 window.closeModal = closeModal; // para el botón × inline
 
 /* pill de estado/tendencia */
@@ -112,6 +192,23 @@ window.__cmpMode = (btn, mode) => {
   card.querySelectorAll('.cmptoggle .seg').forEach(b => b.classList.remove('on')); btn.classList.add('on');
   card.querySelectorAll('.cu-imp').forEach(e => e.style.display = mode === 'imp' ? '' : 'none');
   card.querySelectorAll('.cu-pz').forEach(e => e.style.display = mode === 'pz' ? '' : 'none');
+};
+
+/* Comparativo con selector de periodo: corriente (hoy) vs periodo anterior (mes/Q previos).
+   Usar en lugar de comparativaHTML(comparativa(serie)) para que el usuario alterne. */
+export function comparativaDualHTML(serie) {
+  const hoy = hoyMes(), prev = mesAnterior(hoy);
+  const qOf = m => { const [mm, yy] = String(m).split('/').map(Number); return 'Q' + (Math.floor((mm - 1) / 3) + 1) + ' ' + yy; };
+  return `<div class="cmpdual">
+    <div class="cmptoggle" style="margin-bottom:8px"><button class="seg on" onclick="__cmpPer(this,'cur')">📅 Periodo corriente (${esc(mesLabel(hoy))} · ${esc(qOf(hoy))})</button><button class="seg" onclick="__cmpPer(this,'prev')">Periodo anterior (${esc(mesLabel(prev))} · ${esc(qOf(prev))})</button></div>
+    <div data-per="cur">${comparativaHTML(comparativa(serie, hoy))}</div>
+    <div data-per="prev" style="display:none">${comparativaHTML(comparativa(serie, prev))}</div>
+  </div>`;
+}
+window.__cmpPer = (btn, per) => {
+  const w = btn.closest('.cmpdual'); if (!w) return;
+  btn.parentElement.querySelectorAll('.seg').forEach(b => b.classList.remove('on')); btn.classList.add('on');
+  w.querySelectorAll('[data-per]').forEach(p => { p.style.display = p.dataset.per === per ? '' : 'none'; });
 };
 
 /* tabla de materiales facturados a un solic/dest, con su tendencia */

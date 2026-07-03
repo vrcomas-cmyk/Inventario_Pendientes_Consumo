@@ -3,24 +3,23 @@
    Paginación (dataset completo), orden multi-columna, sugerencias, filtros
    vacíos, gráfica dinámica de facturación y rankings.
    =========================================================================== */
-import { norm, num, fmt, money, esc, mesKey } from './utils.js';
+import { norm, num, fmt, money, esc, mesKey, moneyD, pickField } from './utils.js';
 import { store, RC } from './store.js';
 import { serieMatDest, serieDeConsumo, clasificarEstado, tendenciaTexto, comparativa, aMesAnio, mesLabel,
-         rankingMaterialesAvg12, rankingSolicitantes, mesRefQAnterior, hoyMes, ESTADOS } from './resumenFac.js';
-import { openModal, drawSerie, pill, trendText, comparativaHTML, rankingHTML, backBtn, navOpen, navPush, openClientesMes } from './ui.js';
+         mesRefQAnterior, hoyMes, ESTADOS } from './resumenFac.js';
+import { openModal, drawSerie, pill, trendText, rankingHTML, backBtn, navOpen, navPush, openClientesMes, comparativaDualHTML } from './ui.js';
 import { openEvol } from './sugerencias.js';
-import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest, periodoControlHTML, wirePeriodo, dateRange, inRangeMonth } from './filters.js';
+import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest, periodoControlHTML, wirePeriodo, dateRange, inRangeMonth, wireAddfClicks } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
 import { makeSort, cycleSort, applySort, th } from './sort.js';
 import { exportXlsx, stamp } from './exportx.js';
 import { grupoCliente, ejecutivoNombre, matSector, matGrupo } from './enrich.js';
 
 /* enriquecimiento (misma lógica que Sugerencias): Gpo.Vdor.=Zona, Grp.Cliente=Gpo Cte */
-const pickV = (r, names) => { for (const n of names) { const v = norm(r[n]); if (v) return v; } return ''; };
-const gpoVdor = r => pickV(r, ['Gpo. Vdor.', 'Gpo.Vdor.', 'Gpo Vdor', 'Grupo Vendedor', 'Grupo de vendedor']);
-const centroDe = r => pickV(r, [RC.centro, 'Centro', 'CENTRO', 'Centro Destinatario', 'Centro destinatario']);
-const ultFacDestDe = r => pickV(r, [RC.ultFacDest, 'Ultima_facturacion_destinatario', 'Última_facturación_destinatario', 'Ultima facturacion destinatario', 'Ultima_facturacion_dest', 'Ultima_Facturacion_Destinatario']);
-const gpoCte  = r => pickV(r, ['Grp. Cliente', 'Gpo. Cte.', 'Gpo Cte', 'Gpo. Cte', 'Grupo de cliente']);
+const gpoVdor = r => pickField(r, ['Gpo. Vdor.', 'Gpo.Vdor.', 'Gpo Vdor', 'Grupo Vendedor', 'Grupo de vendedor']);
+const centroDe = r => pickField(r, [RC.centro, 'Centro', 'CENTRO', 'Centro Destinatario', 'Centro destinatario']);
+const ultFacDestDe = r => pickField(r, [RC.ultFacDest, 'Ultima_facturacion_destinatario', 'Última_facturación_destinatario', 'Ultima facturacion destinatario', 'Ultima_facturacion_dest', 'Ultima_Facturacion_Destinatario']);
+const gpoCte  = r => pickField(r, ['Grp. Cliente', 'Gpo. Cte.', 'Gpo Cte', 'Gpo. Cte', 'Grupo de cliente']);
 const ejecDe   = r => ejecutivoNombre(gpoVdor(r));
 const grupoCli = r => grupoCliente(gpoCte(r)) || gpoCte(r);
 const sectorDe = r => matSector(r[RC.material]);
@@ -43,8 +42,8 @@ const cantFechaCell = (cant, fecha) => `<div><b>${fmt(cant)}</b></div><div class
 function consumoCells(r) {
   const st = statusOf(r), tn = tendOf(r);
   return `<td class="num">${vsCell(r[RC.consumoAct], r[RC.promedio])}</td>
-    <td>${cantFechaCell(r[RC.cantUlt], r[RC.ultMes])}</td><td class="num">${money(r[RC.impUlt])}</td><td class="num">${money(r[RC.precioUltUni])}</td>
-    <td>${cantFechaCell(r[RC.cantPen], r[RC.penFecha])}</td><td class="num">${money(r[RC.impPen])}</td><td class="num">${money(r[RC.precioPenUni])}</td>
+    <td data-sort="${mesKey(aMesAnio(r[RC.ultMes]))}">${cantFechaCell(r[RC.cantUlt], r[RC.ultMes])}</td><td class="num">${money(r[RC.impUlt])}</td><td class="num">${moneyD(r[RC.precioUltUni])}</td>
+    <td data-sort="${mesKey(aMesAnio(r[RC.penFecha]))}">${cantFechaCell(r[RC.cantPen], r[RC.penFecha])}</td><td class="num">${money(r[RC.impPen])}</td><td class="num">${moneyD(r[RC.precioPenUni])}</td>
     <td>${pill(st.label, st.cls)}</td><td>${trendText(tn)}</td>`;
 }
 
@@ -54,9 +53,9 @@ export function consumoTableHTML(list) {
     <th>Última (cant/mes)</th><th class="num">Importe última</th><th class="num">P.U. última</th>
     <th>Penúltima (cant/mes)</th><th class="num">Importe penúlt.</th><th class="num">P.U. penúlt.</th><th>Estado</th><th>Tendencia</th></tr>`;
   const body = list.map((r, i) => `<tr class="click" data-cmi="${i}">
-    <td>${esc(r[RC.razon])}<div class="sub">Solic ${esc(r[RC.solic])} · Dest ${esc(r[RC.dest])}</div></td>
+    <td>${esc(r[RC.razon])}<div class="sub"><span class="lnk" data-gosolic="${esc(r[RC.solic])}">Solic ${esc(r[RC.solic])}</span> · <span class="lnk" data-godest="${esc(r[RC.dest])}">Dest ${esc(r[RC.dest])}</span></div></td>
     <td>${esc(grupoCli(r)) || '—'}</td><td>${esc(ejecDe(r)) || '—'}</td><td>${esc(centroDe(r)) || '—'}</td>
-    <td>${esc(r[RC.material])}<div class="sub">${esc(r[RC.texto])}</div></td>
+    <td><span class="lnk" data-goinv="${esc(r[RC.material])}">${esc(r[RC.material])}</span><div class="sub">${esc(r[RC.texto])}</div></td>
     ${consumoCells(r)}</tr>`).join('');
   return `<div class="tbl"><table><thead>${head}</thead><tbody>${body || '<tr><td colspan="14" class="muted" style="padding:14px;text-align:center">Sin facturación de consumo para este material.</td></tr>'}</tbody></table></div>`;
 }
@@ -203,7 +202,7 @@ export function openGrupoDetalle(grupo) {
     ${backBtn()}<button class="x" onclick="closeModal()">×</button>
     <h2>Grupo de artículo · ${esc(grupo)}</h2>
     <p class="muted">${rows.length} solicitante(s) · 🆕 ${nueva} nueva compra · 🔁 ${react} reactivación · ${trendText(tendenciaTexto(serie))}</p>
-    <div class="card"><h3>📊 Comparativo — mes corriente vs año anterior · Q corriente vs año anterior</h3>${comparativaHTML(comparativa(serie))}</div>
+    <div class="card"><h3>📊 Comparativo — mes corriente vs año anterior · Q corriente vs año anterior</h3>${comparativaDualHTML(serie)}</div>
     <div class="card"><h3>📈 Evolución mensual — facturación del grupo</h3><div class="chartbox"><canvas id="cGrp"></canvas></div></div>
     <div class="card"><h3>👥 Solicitantes <span class="hint">clic para ver su facturación</span></h3>
     <input class="mff" data-mf placeholder="🔎 filtrar cliente…">
@@ -252,8 +251,7 @@ function paint(container) {
   const grNueva = grSum.reduce((a, x) => a + x.nueva, 0), grReact = grSum.reduce((a, x) => a + x.reactiva, 0);
   const grNuevaPrev = grSum.reduce((a, x) => a + x.nuevaPrev, 0), grReactPrev = grSum.reduce((a, x) => a + x.reactivaPrev, 0);
   const refPrev = mesRefQAnterior();
-  const _q = (() => { const [cm, cy] = String(hoyMes()).split('/').map(Number); return 'Q' + (Math.floor((cm - 1) / 3) + 1) + ' ' + cy; })();
-  const qLbl = _q;
+  const qLbl = (() => { const [cm, cy] = String(hoyMes()).split('/').map(Number); return 'Q' + (Math.floor((cm - 1) / 3) + 1) + ' ' + cy; })();
 
   const head = [
     th('Cliente (Solic › Razón › Dest)', 'cliente', sort),
@@ -270,7 +268,7 @@ function paint(container) {
         <div style="font-size:11px;margin-top:2px">
           <span class="lnk" data-ev="solic" data-key="${esc(r[RC.solic])}">Solic ${esc(r[RC.solic])}</span> ·
           <span class="lnk" data-ev="dest" data-key="${esc(r[RC.dest])}">Dest ${esc(r[RC.dest])}</span></div></td>
-      <td>${esc(grupoCli(r)) || '—'}</td><td>${esc(ejecDe(r)) || '—'}</td><td>${esc(centroDe(r)) || '—'}</td>
+      <td>${grupoCli(r) ? `<span class="lnk" data-addf="grupocli|${esc(grupoCli(r))}" title="Filtrar por este grupo">${esc(grupoCli(r))}</span>` : '—'}</td><td>${ejecDe(r) ? `<span class="lnk" data-addf="ejecutivo|${esc(ejecDe(r))}" title="Filtrar por este ejecutivo">${esc(ejecDe(r))}</span>` : '—'}</td><td>${centroDe(r) ? `<span class="lnk" data-addf="centro|${esc(centroDe(r))}" title="Filtrar por este centro">${esc(centroDe(r))}</span>` : '—'}</td>
       <td><span class="lnk" data-ev="mat">${esc(r[RC.material])}</span><div class="sub">${esc(r[RC.texto])}</div></td>
       <td>${esc(sectorDe(r)) || '—'}<div class="sub">${esc(grupoArt(r)) || ''}</div></td>
       ${consumoCells(r)}
@@ -290,7 +288,7 @@ function paint(container) {
     </div>
     <div class="tablecard" style="margin-bottom:12px">
       <h3>📊 Comparativo de la selección — mes corriente vs año anterior · Q corriente vs año anterior</h3>
-      ${comparativaHTML(comparativa(aggSerie(list)))}
+      ${comparativaDualHTML(aggSerie(list))}
     </div>
     <div class="tablecard" style="margin-bottom:12px">
       <h3>🆕 Nuevas compras y reactivaciones por Grupo de artículo <span class="hint">por solicitante · Q corriente = ${esc(qLbl)} · se ajusta a los filtros · clic en un grupo</span></h3>
@@ -339,6 +337,7 @@ function paint(container) {
     else if (kind === 'dest') navOpen(() => openEvol('dest', el.dataset.key));
     else if (kind === 'mat') { const r = rows().find(x => keyR(x) === el.closest('tr').dataset.k); navOpen(() => openMaterial(r)); }
   }));
+  wireAddfClicks(container, flt, () => renderConsumo(container));
   container.querySelectorAll('.result [data-grupo]').forEach(tr => tr.addEventListener('click', () => navOpen(() => openGrupoDetalle(tr.dataset.grupo))));
   container.querySelectorAll('.result tr.click').forEach(tr => tr.addEventListener('click', () => {
     if (tr.dataset.grupo) return;
@@ -379,7 +378,7 @@ export function openMaterial(r) {
       <div class="stat"><div class="l">Estado</div><div class="v" style="font-size:14px">${pill(st.label, st.cls)}</div></div>
       <div class="stat"><div class="l">Tendencia</div><div class="v" style="font-size:14px">${trendText(tendOf(r))}</div></div>
     </div>
-    <div class="card"><h3>📊 Comparativo: mes actual vs año anterior · Q actual vs año anterior</h3>${comparativaHTML(comparativa(serie))}</div>
+    <div class="card"><h3>📊 Comparativo: mes actual vs año anterior · Q actual vs año anterior</h3>${comparativaDualHTML(serie)}</div>
     <div class="card"><h3>📈 Evolución mensual — material + destinatario <span class="hint">clic en un mes = clientes de ese material</span></h3><div class="chartbox"><canvas id="cC"></canvas></div></div>`);
   drawSerie('cC', serie, '', undefined, mes => navPush(() => openClientesMes(r[RC.material], mes)));
   document.querySelector('#modal [data-go="solic"]')?.addEventListener('click', () => navPush(() => openEvol('solic', r[RC.solic])));

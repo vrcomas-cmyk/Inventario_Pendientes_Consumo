@@ -3,12 +3,13 @@
    Búsqueda con refresco ligero (admite espacios). 2x2 + ranking, filtros
    Condición/Grupo/Sector + multi-filtro, zoom, admin (ocultar filas), drills.
    =========================================================================== */
-import { norm, num, fmt, money, esc, vigencia } from './utils.js';
+import { norm, num, fmt, money, esc, vigencia, moneyD, pickField } from './utils.js';
 import { store, C, RC } from './store.js';
-import { serieMatDest, serieMaterial, precioMinAnioMaterial, clientesPorMesMaterial, tendenciaTexto, mesLabel, aMesAnio } from './resumenFac.js';
-import { openModal, pill, trendText, rankingHTML, navOpen, navPush, backBtn, drawSerie, openClientesMes } from './ui.js';
+import { serieMaterial, precioMinAnioMaterial, tendenciaTexto } from './resumenFac.js';
+import { openModal, pill, trendText, rankingHTML, navOpen, navPush, backBtn, drawSerie, openClientesMes, wireSegToggle } from './ui.js';
 import { consumoTableHTML, consumoMaterialRows, openConsumoMaterial } from './consumo.js';
-import { openDetalle, openPedido } from './sugerencias.js';
+import { openDetalle } from './sugerencias.js';
+import { sugTablaHTML, sugExportRows } from './sugTabla.js';
 import { ejecutivoNombre, grupoCliente } from './enrich.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
@@ -260,6 +261,23 @@ export function precioInvMat(material) {
   const nuevo = rows.find(r => !/corta/i.test(norm(r[F.cond])));
   return num((nuevo || rows[0])[F.precio]);
 }
+/* condiciones del material con su precio y stock (para "Precio especial") */
+export function condicionesMaterial(material) {
+  if (!CONS || !F.material) return [];
+  const m = norm(material);
+  return CONS.filter(r => norm(r[F.material]) === m)
+    .map(r => ({ cond: norm(r[F.cond]) || '—', precio: F.precio ? num(r[F.precio]) : null,
+      stock: F.invSuma ? num(r[F.invSuma]) : 0, imp: F.importe ? num(r[F.importe]) : 0 }))
+    .filter(x => x.cond || x.precio);
+}
+export function preciosCondHTML(material) {
+  const cs = condicionesMaterial(material);
+  if (!cs.length) return '';
+  const esNormal = c => /nuevo|normal/i.test(c);
+  const rows = cs.map(x => `<tr><td>${esc(x.cond)}${!esNormal(x.cond) ? ' <span class="pill amb">Precio especial</span>' : ''}</td><td class="num">${x.precio != null ? moneyD(x.precio) : '—'}</td><td class="num">${fmt(x.stock)}</td><td class="num">${money(x.imp)}</td></tr>`).join('');
+  return `<div class="card"><h3>🏷️ Inventario por condición / precios <span class="hint">condiciones como "Lento mov" traen precio especial</span></h3>
+    <div class="tbl"><table><thead><tr><th>Condición</th><th class="num">Precio</th><th class="num">Stock</th><th class="num">Importe inv.</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
 
 export function showLotes(material, centro, almacen) {
   const lotes = (DET || []).filter(r => {
@@ -277,28 +295,13 @@ export function showLotes(material, centro, almacen) {
   const body = lotes.map(r => ({ r, d: diasCad(r.FechaCaducidad) }))
     .sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9))
     .map(({ r, d }) => { const vg = vigencia(r.FechaCaducidad); return `<tr>
-      <td>${esc(r.Centro)}</td><td>${esc(r['Almacén'])}</td><td>${esc(r.Lote)}</td><td>${esc(r.FechaCaducidad) || '—'}${vg ? `<div class="vig ${vg.cls}">${vg.txt}</div>` : ''}</td>
+      <td>${store.ROLE && store.ROLE.rss ? `<span class="lnk" data-gorss="${esc(material)}|${esc(r.Centro)}" title="Ver en Resumen Sin Sugerencias">${esc(r.Centro)}</span>` : esc(r.Centro)}</td><td>${esc(r['Almacén'])}</td><td>${esc(r.Lote)}</td><td>${esc(r.FechaCaducidad) || '—'}${vg ? `<div class="vig ${vg.cls}">${vg.txt}</div>` : ''}</td>
       <td class="num"><span class="tnd ${d != null && d <= INV_CFG.expiry.mes1 ? 'down' : ''}">${d == null ? '—' : d}</span></td>
-      <td class="num">${fmt(r.CantidadDisp)}</td><td class="num">${pLote != null ? money(pLote) : '—'}</td></tr>`; }).join('');
+      <td class="num">${fmt(r.CantidadDisp)}</td><td class="num">${pLote != null ? moneyD(pLote) : '—'}</td></tr>`; }).join('');
   // Sugerencias (BO) que tienen este material
   const sug = (store.BO || []).filter(it => norm(it.bo[C.matBase]) === norm(material));
   const pOferta = precioInvMat(material);
-  const sugBody = sug.map((it, i) => { const b = it.bo, bl = norm(b[C.bloq]);
-    return `<tr class="click ${bl ? 'bloq' : ''}" data-si="${i}">
-      <td><b><span class="lnk" data-ped="${esc(b[C.pedido])}">${esc(b[C.pedido])}</span></b><div class="sub">OC ${esc(b[C.oc]) || '—'}</div></td>
-      <td>${esc(b[C.fecha]) || '—'}</td>
-      <td>${esc(b[C.razon])}<div class="sub">Solic ${esc(b[C.solic])} · Dest ${esc(b[C.dest])}</div></td>
-      <td>${esc(grupoCliente(b[C.gpo]) || b[C.gpo]) || '—'}</td>
-      <td>${esc(ejecutivoNombre(b[C.gpoV])) || '—'}</td>
-      <td>${esc(b[C.centro])}${norm(b[C.alm]) ? ' / ' + esc(b[C.alm]) : ''}</td>
-      <td class="num">${fmt(b[C.pend])}</td><td class="num">${money(b[C.precio])}</td><td class="num">${pOferta != null ? money(pOferta) : '—'}</td>
-      <td>${bl ? `<span class="pill amb">${esc(bl)}</span>` : '—'}</td>
-      <td>${pill(it.status.label, it.status.cls)}</td><td>${trendText(it.tend)}</td></tr>`;
-  }).join('');
-  const sugTable = `<div class="tbl"><table>
-      <thead><tr><th>Pedido / OC</th><th>Fecha</th><th>Cliente</th><th>Grupo cliente</th><th>Ejecutivo</th><th>Centro/Alm</th><th class="num">Pendiente</th><th class="num">Precio</th><th class="num">Precio oferta</th><th>Bloqueado</th><th>Estado</th><th>Tendencia</th></tr></thead>
-      <tbody>${sugBody || '<tr><td colspan="12" class="muted" style="padding:14px;text-align:center">Sin sugerencias para este material.</td></tr>'}</tbody>
-    </table></div>`;
+  const sugTable = sugTablaHTML(sug, pOferta, 'data-si');
 
   // Consumo: clientes que han facturado este material (mismas columnas que Consumo)
   const consRows = consumoMaterialRows(material);
@@ -322,6 +325,7 @@ export function showLotes(material, centro, almacen) {
       <table><thead><tr><th>Centro</th><th>Almacén</th><th>Lote</th><th>Caducidad / vigencia</th><th class="num">Días</th><th class="num">Cantidad</th><th class="num">Precio</th></tr></thead>
       <tbody>${body || '<tr><td colspan="7" class="muted" style="padding:16px;text-align:center">Sin lotes.</td></tr>'}</tbody></table>
     </div></div>
+    ${preciosCondHTML(material)}
     <div class="tablecard">
       <h3>📈 Tendencia del material <span class="hint">facturación mensual (Resumen_Fac)</span></h3>
       <div class="consu" style="margin-bottom:8px">
@@ -335,7 +339,6 @@ export function showLotes(material, centro, almacen) {
     <div class="tablecard" data-pane="sug"><h3>📋 Sugerencias con este material <span class="hint">clic en una fila para ver el detalle</span> <button class="btn" data-expsug style="float:right">⬇️ Excel</button></h3><input class="mff" data-mf placeholder="🔎 filtrar…">${sugTable}</div>
     <div class="tablecard" data-pane="cons" style="display:none"><h3>📊 Clientes que han facturado este material <span class="hint">clic en una fila para ver el detalle</span> <button class="btn" data-expcons style="float:right">⬇️ Excel</button></h3><input class="mff" data-mf placeholder="🔎 filtrar…">${consTable}</div>`);
 
-  const pickC = (r, names) => { for (const n of names) { const v = norm(r[n]); if (v) return v; } return ''; };
   if (document.getElementById('cMat')) drawSerie('cMat', matSerie, 'Facturación mensual', undefined, mes => navPush(() => openClientesMes(material, mes)));
   const expc = document.querySelector('#modal [data-expcons]');
   if (expc) expc.onclick = () => {
@@ -343,8 +346,8 @@ export function showLotes(material, centro, almacen) {
     const src = vis.length ? vis.map(i => consRows[i]) : consRows;
     const rowsX = src.map(r => ({
       'Solicitante': norm(r[RC.solic]), 'Destinatario': norm(r[RC.dest]), 'Razón social': norm(r[RC.razon]),
-      'Grupo cliente': grupoCliente(pickC(r, ['Grp. Cliente', 'Gpo. Cte.', 'Gpo Cte'])) || pickC(r, ['Grp. Cliente', 'Gpo. Cte.', 'Gpo Cte']),
-      'Ejecutivo': ejecutivoNombre(pickC(r, ['Gpo. Vdor.', 'Gpo.Vdor.', 'Grupo de vendedor'])),
+      'Grupo cliente': grupoCliente(pickField(r, ['Grp. Cliente', 'Gpo. Cte.', 'Gpo Cte'])) || pickField(r, ['Grp. Cliente', 'Gpo. Cte.', 'Gpo Cte']),
+      'Ejecutivo': ejecutivoNombre(pickField(r, ['Gpo. Vdor.', 'Gpo.Vdor.', 'Grupo de vendedor'])),
       'Material': norm(r[RC.material]), 'Descripción': norm(r[RC.texto]),
       'Consumo actual': num(r[RC.consumoAct]), 'Prom. mensual': num(r[RC.promedio]),
       'Último mes': norm(r[RC.ultMes]), 'Cant. última': num(r[RC.cantUlt]), 'Importe última': num(r[RC.impUlt]), 'P.U. última': num(r[RC.precioUltUni]),
@@ -354,27 +357,9 @@ export function showLotes(material, centro, almacen) {
   };
 
   const expb = document.querySelector('#modal [data-expsug]');
-  if (expb) expb.onclick = () => {
-    const rowsX = sug.map(it => { const b = it.bo; return {
-      'Pedido': norm(b[C.pedido]), 'OC': norm(b[C.oc]), 'Fecha': norm(b[C.fecha]),
-      'Razón social': norm(b[C.razon]), 'Solicitante': norm(b[C.solic]), 'Destinatario': norm(b[C.dest]),
-      'Grupo cliente': grupoCliente(b[C.gpo]) || norm(b[C.gpo]),
-      'Ejecutivo': ejecutivoNombre(b[C.gpoV]), 'Centro': norm(b[C.centro]), 'Almacén': norm(b[C.alm]),
-      'Material': norm(material), 'Pendiente': num(b[C.pend]), 'Precio': num(b[C.precio]), 'Precio oferta': pOferta,
-      'Bloqueado': norm(b[C.bloq]), 'Estado': it.status.label, 'Tendencia': it.tend.txt,
-    }; });
-    exportXlsx(`sugerencias_material_${norm(material)}_${stamp()}.xlsx`, rowsX, 'Sugerencias');
-  };
+  if (expb) expb.onclick = () => exportXlsx(`sugerencias_material_${norm(material)}_${stamp()}.xlsx`, sugExportRows(sug, pOferta), 'Sugerencias');
 
-  const panes = { sug: document.querySelector('#modal [data-pane="sug"]'), cons: document.querySelector('#modal [data-pane="cons"]') };
-  document.querySelectorAll('#modal .seg').forEach(btn => btn.addEventListener('click', () => {
-    document.querySelectorAll('#modal .seg').forEach(b => b.classList.remove('on'));
-    btn.classList.add('on');
-    const v = btn.dataset.view;
-    panes.sug.style.display = v === 'sug' ? '' : 'none';
-    panes.cons.style.display = v === 'cons' ? '' : 'none';
-  }));
-  document.querySelectorAll('#modal [data-ped]').forEach(el => el.addEventListener('click', ev => { ev.stopPropagation(); navPush(() => openPedido(el.dataset.ped)); }));
+  wireSegToggle();
   document.querySelectorAll('#modal tr[data-si]').forEach(tr => tr.addEventListener('click', () => navPush(() => openDetalle(sug[+tr.dataset.si]))));
   document.querySelectorAll('#modal tr[data-cmi]').forEach(tr => tr.addEventListener('click', () => openConsumoMaterial(consRows[+tr.dataset.cmi])));
 }

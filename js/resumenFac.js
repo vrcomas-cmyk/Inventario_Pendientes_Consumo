@@ -204,6 +204,12 @@ export function diasDesdeUltimo(serie) {
      (>150) · Sin compra +1 año (>365); reciente -> Al corriente.
    --------------------------------------------------------------------------- */
 /* mes real de hoy en formato mm/aaaa (para el cálculo de Q corriente) */
+/* mm/aaaa del mes anterior a refMes */
+export function mesAnterior(refMes = hoyMes()) {
+  const k = mesKey(refMes) - 1;
+  const yy = Math.floor((k - 1) / 12), mm = ((k - 1) % 12) + 1;
+  return String(mm).padStart(2, '0') + '/' + yy;
+}
 export function hoyMes() {
   const d = new Date();
   return String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
@@ -252,7 +258,7 @@ export function completarSerie(serie, range) {
   if (range) { [loK, hiK] = range; }
   else {
     if (!serie || !serie.length) return serie || [];
-    loK = mesKey(serie[0].mes); hiK = Math.max(mesKey(serie[serie.length - 1].mes), mesKey(store.CURMES));
+    loK = mesKey(serie[0].mes); hiK = Math.max(mesKey(serie[serie.length - 1].mes), mesKey(hoyMes()));
   }
   if (!loK || !hiK || loK > hiK) return [];
   const out = []; let k = loK, guard = 0;
@@ -293,14 +299,14 @@ export function tendenciaTexto(serie) {
 /* ---------------------------------------------------------------------------
    comparativa · mes actual vs mismo mes año anterior, y Q actual vs Q año ant.
    --------------------------------------------------------------------------- */
-export function comparativa(serie) {
+export function comparativa(serie, refMes = hoyMes()) {
   const list = serie || [];
   const val = (mm, yy) => {
     const key = String(mm).padStart(2, '0') + '/' + yy;
     const f = list.find(s => s.mes === key);
     return f ? { cant: f.cant, imp: f.imp } : { cant: 0, imp: 0 };
   };
-  const [cm, cy] = String(store.CURMES).split('/').map(Number);
+  const [cm, cy] = String(refMes).split('/').map(Number);
   const q = Math.floor((cm - 1) / 3);
   const qMonths = [q * 3 + 1, q * 3 + 2, q * 3 + 3];
   const sumQ = yy => qMonths.reduce((a, mm) => { const v = val(mm, yy); return { cant: a.cant + v.cant, imp: a.imp + v.imp }; }, { cant: 0, imp: 0 });

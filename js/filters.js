@@ -163,3 +163,12 @@ export function restoreFocus(container, f) {
   if (el) { el.focus(); const v = el.value; el.value = ''; el.value = v; }
   f._focus = null;
 }
+
+/* clic en una celda con data-addf="campo|valor" agrega ese filtro a la vista */
+export function wireAddfClicks(container, f, rerender) {
+  container.querySelectorAll('.result [data-addf]').forEach(el => el.addEventListener('click', ev => {
+    ev.stopPropagation();
+    const [k, v] = el.dataset.addf.split('|');
+    if (!f.list.some(x => x.key === k && x.val === v)) { f.list.push({ key: k, val: v }); rerender(); }
+  }));
+}

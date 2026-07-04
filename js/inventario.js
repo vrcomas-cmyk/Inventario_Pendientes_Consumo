@@ -10,7 +10,8 @@ import { openModal, pill, trendText, rankingHTML, navOpen, navPush, backBtn, dra
 import { consumoTableHTML, consumoMaterialRows, openConsumoMaterial } from './consumo.js';
 import { openDetalle } from './sugerencias.js';
 import { sugTablaHTML, sugExportRows } from './sugTabla.js';
-import { ejecutivoNombre, grupoCliente } from './enrich.js';
+import { ejecutivoNombre, grupoCliente, matSector, matGrupo } from './enrich.js';
+import { rssReady, rssPendPorAlm, rssTransitoPorAlm, rssTransito1032, rssPend1032, rssLentoMaterial } from './rssStore.js';
 import { toolbarHTML, wireToolbar, makeFilters, passes, makeSuggest } from './filters.js';
 import { zoomHTML, wireZoom } from './zoom.js';
 import { makeSort, cycleSort, applySort, th } from './sort.js';
@@ -190,19 +191,31 @@ function paint(container) {
   }).filter(x => x.val > 0).sort((a, b) => b.val - a.val).slice(0, 10) : [];
 
   const head = `${isAdmin ? '<th></th>' : ''}
-    ${th('Material + Descripción', 'mat', sort)}${th('Condición', 'cond', sort)}${F.grupo ? th('Grupo', 'grupo', sort) : ''}${th('Precio', 'precio', sort, 'num')}
+    ${th('Material + Descripción', 'mat', sort)}${th('Condición', 'cond', sort)}${F.grupo ? th('Sector / Grupo art.', 'grupo', sort) : ''}${th('Precio', 'precio', sort, 'num')}
     ${th('Disp 1031·1030', 'disp1030', sort, 'num')}${th('Disp 1031·1032', 'disp1032', sort, 'num')}
     ${INVCODES.map(c => th('Inv ' + c, 'inv' + c, sort, 'num')).join('')}${th('Inv Suma', 'invSuma', sort, 'num')}${th('Importe $', 'importe', sort, 'num')}`;
 
   const body = list.slice(0, 1000).map(r => {
     const mat = norm(r[F.material]), k = rowKey(r), isH = hidden.has(k);
-    const inv = INVCODES.map(c => `<td class="num"><span class="lnk" data-mat="${esc(mat)}" data-cen="${c}">${fmt(r['Inv ' + c])}</span></td>`).join('');
+    const corta = /corta/i.test(norm(r[F.cond]));
+    const pendAlm = rssReady() ? rssPendPorAlm(mat) : {};
+    const transAlm = rssReady() ? rssTransitoPorAlm(mat) : {};
+    const t1032 = rssReady() ? rssTransito1032(mat) : 0;
+    const inv = INVCODES.map(c => {
+      const pend = pendAlm[c] || 0;
+      const curso = corta ? (c === '1032' ? t1032 : 0) : (transAlm[c] || 0);
+      const sub = (pend || curso) ? `<div class="sub">${pend ? `<span class="tnd down">Pend ${fmt(pend)}</span>` : ''}${curso ? ` <span class="tnd up">+${fmt(curso)}</span>` : ''}</div>` : '';
+      return `<td class="num"><span class="lnk" data-mat="${esc(mat)}" data-cen="${c}">${fmt(r['Inv ' + c])}</span>${sub}</td>`;
+    }).join('');
+    const lento = rssReady() && rssLentoMaterial(mat) ? ` <span class="lento" title="Sin facturación ≥6 meses (centro/material). Candidato a revisar/reubicar.">⚠️</span>` : '';
+    const dist1032 = corta && rssReady() && rssPend1032(mat) > 0 ? ` <span class="pill amb" title="Hay material pendiente en el almacén 1032">Pend 1032</span>` : '';
+    const secGrp = `${esc(matSector(mat)) || '—'}<div class="sub">${esc(matGrupo(mat)) || ''}</div>`;
     return `<tr class="${isAdmin && isH ? 'hidden-admin' : ''}">
       ${isAdmin ? `<td><span class="rowhide" data-hk="${esc(k)}" title="${isH ? 'Mostrar' : 'Ocultar'}">${isH ? '↩' : '🚫'}</span></td>` : ''}
-      <td><div><span class="lnk" data-mat="${esc(mat)}" data-all="1">${esc(r[F.material])}</span></div><div class="muted" style="font-size:11px">${esc(r[F.texto])}</div></td>
-      <td>${pill(norm(r[F.cond]) || '—', 'gris')}</td>
-      ${F.grupo ? `<td>${esc(r[F.grupo])}</td>` : ''}
-      <td class="num">${F.precio ? money(r[F.precio]) : '—'}</td>
+      <td><div><span class="lnk" data-mat="${esc(mat)}" data-all="1">${esc(r[F.material])}</span>${lento}</div><div class="muted" style="font-size:11px">${esc(r[F.texto])}</div></td>
+      <td>${pill(norm(r[F.cond]) || '—', corta ? 'rojo' : 'gris')}${dist1032}</td>
+      ${F.grupo ? `<td>${secGrp}</td>` : ''}
+      <td class="num">${F.precio ? moneyD(r[F.precio]) : '—'}</td>
       <td class="num"><span class="lnk" data-mat="${esc(mat)}" data-cen="1031" data-alm="1030">${fmt(r[F.disp1030])}</span></td>
       <td class="num"><span class="lnk" data-mat="${esc(mat)}" data-cen="1031" data-alm="1032">${fmt(r[F.disp1032])}</span></td>
       ${inv}
@@ -241,6 +254,7 @@ function paint(container) {
 /* ---- API para otras vistas (Sugerencias) ---- */
 export async function ensureInvData() { if (!loaded && !loading) await load(); return loaded; }
 if (typeof window !== 'undefined') window.__openMaterialInv = mat => ensureInvData().finally(() => navPush(() => showLotes(mat)));
+if (typeof window !== 'undefined') window.__condMat = mat => { try { return condicionesMaterial(mat); } catch { return []; } };
 export function precioInv(material, condText) {
   if (!CONS || !F.material) return null;
   const m = norm(material), ct = norm(condText).toLowerCase();

@@ -6,7 +6,7 @@
    =========================================================================== */
 import { norm, num, fmt, money, esc, mesKey } from './utils.js';
 import { store, C, RC } from './store.js';
-import { openModal, backBtn, pill, navPush, wireSegToggle } from './ui.js';
+import { openModal, backBtn, pill, navPush, wireSegToggle, trendText, drawSerie } from './ui.js';
 import { makeFilters, toolbarHTML, wireToolbar, passes, makeSuggest } from './filters.js';
 import { makeSort, applySort, th } from './sort.js';
 import { zoomHTML, wireZoom } from './zoom.js';
@@ -17,6 +17,8 @@ import { showLotes, ensureInvData, precioInvMat, preciosCondHTML } from './inven
 import { navOpen } from './ui.js';
 import { matSector, matGrupo } from './enrich.js';
 import { sugTablaHTML, sugExportRows } from './sugTabla.js';
+import { setRSS } from './rssStore.js';
+import { serieMaterial, tendenciaTexto } from './resumenFac.js';
 
 export const RSS = {
   centro: 'Centro', alm: 'Almacen', pedidos: 'Pedidos', material: 'Material', desc: 'Descripcion',
@@ -64,6 +66,7 @@ export function buildRSS(rows) {
   MATS = mats;
   CENTROS = [...centros].filter(Boolean).sort();
   RSS_CURMES = curMes;
+  setRSS(MATS, CENTROS, RSS_CURMES);
   return mats;
 }
 
@@ -132,7 +135,7 @@ function paint(container) {
   const totInv = list.reduce((s, r) => s + accessor.inv(r), 0);
   const totTransito = list.reduce((s, r) => s + [...r._mo.centros.values()].reduce((a, co) => a + co.transito, 0), 0);
 
-  const head = `${th('Material', 'material', sort)}${th('Descripción', 'desc', sort)}${th('Sector / Grupo art.', 'sector', sort)}${th('Fuentes', 'fuente', sort)}${th('Status Revisión', 'status', sort)}
+  const head = `${th('Material', 'material', sort)}${th('Descripción', 'desc', sort)}${th('Sector / Grupo art.', 'sector', sort)}${th('Tendencia', 'tend', sort)}${th('Status Revisión', 'status', sort)}
     ${CENTROS.map(c => `<th class="num">Centro ${esc(c)}</th>`).join('')}
     ${th('Inv. total', 'inv', sort, 'num')}${th('Pend. total', 'pend', sort, 'num')}`;
 
@@ -155,7 +158,7 @@ function paint(container) {
       <td><span class="lnk" data-mat="${esc(r.material)}">${esc(r.material)}</span></td>
       <td class="muted" style="font-size:11px">${esc(r.desc)}</td>
       <td>${esc(r.sector) || '—'}<div class="sub">${esc(r.grupo) || ''}</div></td>
-      <td>${fuentes.length ? fuentes.map(x => esc(x)).join('<br>') : '—'}</td>
+      <td>${trendText(tendenciaTexto(serieMaterial(r.material)))}</td>
       <td>${statuses.length ? statuses.map(s => pill(s, 'amb')).join(' ') : '—'}</td>
       ${cells}
       <td class="num"><b><span class="lnk" data-tot="${esc(r.material)}">${fmt(invTot)}</span></b></td>
@@ -247,14 +250,30 @@ export function openCeldaDetalle(material, centro) {
     </table></div></div>
     <p class="muted" style="font-size:12px">Dispersión (planta 1031): almacén 1030 = <b>${fmt(mo.disp1030)}</b> · almacén 1032 = <b>${fmt(mo.disp1032)}</b>. Suturas salen del centro 1018.</p>
     ${preciosCondHTML(material)}
+    <div class="tablecard"><h3>📈 Tendencia de facturación — material <span class="hint">Resumen_Fac</span></h3><div class="chartbox" style="height:220px;padding:10px"><canvas id="cRssMat"></canvas></div></div>
     <div class="segm" style="margin-top:14px">
       <button class="seg on" data-view="sug">📋 Sugerencias (${sug.length})</button>
       <button class="seg" data-view="cons">📊 Consumo (${cons.length})</button>
     </div>
     <div class="tablecard" data-pane="sug"><h3>📋 Sugerencias en este centro <span class="hint">clic para ver detalle / pedido</span> <button class="btn" data-expsug style="float:right">⬇️ Excel</button></h3><input class="mff" data-mf placeholder="🔎 filtrar…">${sugTablaHTML(sug, precioInvMat(material))}</div>
-    <div class="tablecard" data-pane="cons" style="display:none"><h3>📊 Consumo en este centro <button class="btn" data-expcons style="float:right">⬇️ Excel</button></h3><input class="mff" data-mf placeholder="🔎 filtrar…">${cons.length ? consumoTableHTML(cons) : '<p class="muted">Sin facturación de consumo.</p>'}</div>`);
-  wireSegToggle();
+    <div class="tablecard" data-pane="cons" style="display:none"><h3>📊 Consumo en este centro <button class="btn" data-expcons style="float:right">⬇️ Excel</button></h3><input class="mff" data-mf placeholder="🔎 filtrar…">${cons.length ? consumoTableHTML(cons) : '<p class="muted">Sin facturación de consumo.</p>'}</div>
+    <div data-condbox style="margin-top:10px"></div>`);
+  wireToggleAndCond(material);
   wireSugCons(sug, cons, material, `${material}_centro_${centro}`);
+}
+/* dibuja la tendencia del material y añade accesos a condiciones (por inventario / por material) */
+function wireToggleAndCond(material) {
+  wireSegToggle();
+  if (document.getElementById('cRssMat')) drawSerie('cRssMat', serieMaterial(material), 'Facturación mensual');
+  const conds = window.__condMat ? window.__condMat(material) : [];
+  const box = document.querySelector('#modal [data-condbox]');
+  if (box && conds.length) {
+    box.innerHTML = `<span class="hint">Este material tiene <b>${conds.length}</b> condición(es) en Inventario:</span> ${conds.map(c => esc(c.cond)).join(', ')}
+      <button class="btn" data-cond-inv style="margin-left:8px">🏷️ Detalle por inventario</button>
+      <button class="btn" data-cond-mat style="margin-left:6px">📦 Detalle por material</button>`;
+    box.querySelector('[data-cond-inv]')?.addEventListener('click', () => { if (window.__openMaterialInv) window.__openMaterialInv(material); });
+    box.querySelector('[data-cond-mat]')?.addEventListener('click', () => navPush(() => openMaterialTotales(material)));
+  }
 }
 
 /* totales del material: sugerencias + consumo de todos los centros */

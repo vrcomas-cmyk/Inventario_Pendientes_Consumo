@@ -9,6 +9,21 @@
    puede ver" para que el endpoint gviz responda.
    =========================================================================== */
 import { norm } from './utils.js';
+import { fetchCatalogMaterials } from './supabaseData.js';
+
+/* Mapa de Supabase (convive con el Google Sheet). Se prefiere Supabase para
+   sector/grupo de artículo; ejecutivo y grupo-cliente-texto siguen del Sheet. */
+const sbMat = new Map();
+let sbLoaded = false;
+async function loadSupabaseEnrich() {
+  try {
+    const cat = await fetchCatalogMaterials();
+    if (!cat || !cat.length) return;
+    sbMat.clear();
+    cat.forEach(r => { const k = normCode(r.material); if (k && !sbMat.has(k)) sbMat.set(k, { sector: norm(r.descr_sector), grupo: norm(r.descr_grupo_art), desc: norm(r.descripcion) }); });
+    sbLoaded = sbMat.size > 0;
+  } catch (e) { /* sin Supabase → se usa el Sheet */ }
+}
 
 const SHEET_ID = '1AeDp_J7sC3PcM1duP3iXKd-VVtWm7g3d3HiSeoKdFTY';
 const TABS = { ejecutivos: 'Ejecutivos', materiales: 'Materiales' };
@@ -56,8 +71,9 @@ function build() {
 
 export async function loadEnrich(force = false) {
   if (loading) return false;
+  const sbTask = loadSupabaseEnrich();   // convive: corre en paralelo, no bloquea si falla
   if (!force) {
-    try { const c = localStorage.getItem(CACHE_KEY); if (c) { const o = JSON.parse(c); EJ = o.EJ || []; MAT = o.MAT || []; build(); loaded = true; return true; } } catch (e) {}
+    try { const c = localStorage.getItem(CACHE_KEY); if (c) { const o = JSON.parse(c); EJ = o.EJ || []; MAT = o.MAT || []; build(); loaded = true; await sbTask; return true; } } catch (e) {}
   }
   loading = true; lastErr = '';
   try {
@@ -66,7 +82,8 @@ export async function loadEnrich(force = false) {
     build(); loaded = true;
   } catch (e) { lastErr = e.message || String(e); }
   finally { loading = false; }
-  return loaded;
+  await sbTask;
+  return loaded || sbLoaded;
 }
 
 export const enrichLoaded = () => loaded;
@@ -78,5 +95,12 @@ export const grupoCliente = code => getKey(mapGrupo, code) || '';
 export const ejecutivoRow = zona => getKey(mapEjec, zona) || null;
 export const ejecutivoNombre = zona => { const r = ejecutivoRow(zona); return r ? norm(r['Ejecutivo']) : ''; };
 export const materialRow = mat => getKey(mapMat, mat) || null;
-export const matSector = mat => { const r = materialRow(mat); return r ? norm(r['Descr. Sector'] || r['Sector']) : ''; };
-export const matGrupo  = mat => { const r = materialRow(mat); return r ? norm(r['Descr. Grupo de Art.'] || r['Grupo de artículos']) : ''; };
+export const matSector = mat => {
+  const s = sbMat.get(normCode(mat)); if (s && s.sector) return s.sector;
+  const r = materialRow(mat); return r ? norm(r['Descr. Sector'] || r['Sector']) : '';
+};
+export const matGrupo = mat => {
+  const s = sbMat.get(normCode(mat)); if (s && s.grupo) return s.grupo;
+  const r = materialRow(mat); return r ? norm(r['Descr. Grupo de Art.'] || r['Grupo de artículos']) : '';
+};
+export const enrichFuente = () => (sbLoaded ? 'Supabase + Google Sheet' : 'Google Sheet');

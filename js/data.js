@@ -46,17 +46,43 @@ export function openUploader() { document.querySelector('#fileInput').click(); }
 
 function readFile(f) {
   const r = new FileReader();
-  r.onload = e => {
-    const wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
-    PENDING = { name: f.name, wb, buf: e.target.result };
-    showSelector(wb);
+  r.onload = async e => {
+    const buf = e.target.result;
+    const parsed = await parseWorkbook(buf);
+    PENDING = { name: f.name, sheets: parsed.sheets, names: parsed.names, buf };
+    showSelector(parsed);
   };
   r.readAsArrayBuffer(f);
 }
 
-function showSelector(wb) {
-  const rowsHtml = wb.SheetNames.map(name => {
-    const rows = sheetRows(wb.Sheets[name]);
+/* === Parseo del Excel fuera del hilo principal (Web Worker) con respaldo === */
+let _worker = null, _workerBad = false;
+function getWorker() {
+  if (_worker || _workerBad) return _worker;
+  try { _worker = new Worker(new URL('./parseWorker.js', import.meta.url)); }
+  catch (e) { _workerBad = true; _worker = null; }
+  return _worker;
+}
+function parseSync(buf) {
+  const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+  const sheets = {}; wb.SheetNames.forEach(n => { sheets[n] = sheetRows(wb.Sheets[n]); });
+  return { names: wb.SheetNames, sheets };
+}
+function parseWorkbook(buf) {
+  return new Promise(resolve => {
+    const w = getWorker();
+    if (!w) { resolve(parseSync(buf)); return; }
+    const done = res => { w.removeEventListener('message', onMsg); w.removeEventListener('error', onErr); resolve(res); };
+    const onMsg = ev => { (ev.data && ev.data.ok) ? done({ names: ev.data.names, sheets: ev.data.sheets }) : done(parseSync(buf)); };
+    const onErr = () => { _workerBad = true; _worker = null; done(parseSync(buf)); };
+    w.addEventListener('message', onMsg); w.addEventListener('error', onErr);
+    try { w.postMessage(buf); } catch (e) { done(parseSync(buf)); }
+  });
+}
+
+function showSelector(parsed) {
+  const rowsHtml = parsed.names.map(name => {
+    const rows = parsed.sheets[name] || [];
     const headers = rows.length ? Object.keys(rows[0]) : [];
     const role = roleOf(headers);
     return `<label class="shrow">
@@ -76,12 +102,11 @@ function showSelector(wb) {
 }
 
 function loadSelected() {
-  const wb = PENDING.wb;
   store.WB = {}; store.ROLE = {};
   const selected = [];
   document.querySelectorAll('#sheetSel input:checked').forEach(chk => {
     const name = chk.dataset.name; selected.push(name);
-    const rows = sheetRows(wb.Sheets[name]);
+    const rows = PENDING.sheets[name] || [];
     store.WB[name] = rows;
     const role = roleOf(rows.length ? Object.keys(rows[0]) : []);
     if (role && !store.ROLE[role]) store.ROLE[role] = name;
@@ -100,11 +125,10 @@ function loadSelected() {
 export async function restoreSaved() {
   let rec; try { rec = await kvGet('file'); } catch (e) { return false; }
   if (!rec || !rec.buf) return false;
-  const wb = XLSX.read(rec.buf, { type: 'array', cellDates: false });
+  const parsed = await parseWorkbook(rec.buf);
   store.WB = {}; store.ROLE = {};
-  (rec.selected || wb.SheetNames).forEach(name => {
-    if (!wb.Sheets[name]) return;
-    const rows = sheetRows(wb.Sheets[name]);
+  (rec.selected || parsed.names).forEach(name => {
+    const rows = parsed.sheets[name]; if (!rows) return;
     store.WB[name] = rows;
     const role = roleOf(rows.length ? Object.keys(rows[0]) : []);
     if (role && !store.ROLE[role]) store.ROLE[role] = name;

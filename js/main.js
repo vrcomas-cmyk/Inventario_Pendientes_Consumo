@@ -1,7 +1,7 @@
 /* ===========================================================================
    main.js · arranque y router de pestañas
    =========================================================================== */
-import { initUpload, openUploader, restoreSaved, forgetSaved, savedFileName } from './data.js';
+import { initUpload, openUploader, restoreSaved, restoreShared, forgetSaved, savedFileName } from './data.js';
 import { renderInventario, ensureInvData } from './inventario.js';
 import { renderSug } from './sugerencias.js';
 import { renderConsumo } from './consumo.js';
@@ -105,7 +105,7 @@ function boot() {
   ensureInvData();
   loadEnrich(false).then(() => render());
   // restaurar archivo guardado (IndexedDB)
-  restoreSaved().then(ok => { if (ok) { buildTabs(); render(); } }).catch(() => {});
+  restoreShared().then(ok => { if (ok) { buildTabs(); render(); } }).catch(() => {});
 }
 
 boot();

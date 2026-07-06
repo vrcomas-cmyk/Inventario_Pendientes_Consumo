@@ -8,6 +8,7 @@ import { buildRSS } from './resumenSin.js';
 import { buildBO } from './sugerencias.js';
 import { openModal, closeModal } from './ui.js';
 import { kvSet, kvGet, kvDel } from './persist.js';
+import { uploadPortalFile, latestPortalUpload, downloadPortalFile } from './supabaseData.js';
 
 /* recalcula el rango real de la hoja (algunos exports traen !ref truncado,
    por eso "se cargan" menos filas de las que tiene el archivo) */
@@ -116,28 +117,56 @@ function loadSelected() {
   store.BO = store.ROLE.sug ? buildBO(store.WB[store.ROLE.sug]) : [];
   if (store.ROLE.rss) buildRSS(store.WB[store.ROLE.rss]);
   // guardar para próximas sesiones (no bloquea la UI)
-  if (PENDING.buf) kvSet('file', { name: PENDING.name, selected, buf: PENDING.buf }).catch(() => {});
+  // guardar localmente (rápido) y en Supabase (multi-dispositivo). Ninguno bloquea la UI.
+  if (PENDING.buf) {
+    kvSet('file', { name: PENDING.name, selected, buf: PENDING.buf }).catch(() => {});
+    uploadPortalFile(PENDING.buf, { name: PENDING.name, fileName: PENDING.name, selected, roles: store.ROLE }).catch(() => {});
+  }
   closeModal();
   onReadyCb();
 }
 
-/* reconstruye el último archivo guardado (al iniciar) */
-export async function restoreSaved() {
-  let rec; try { rec = await kvGet('file'); } catch (e) { return false; }
-  if (!rec || !rec.buf) return false;
-  const parsed = await parseWorkbook(rec.buf);
+/* construye el store a partir de un workbook ya parseado */
+function buildFromParsed(parsed, selected, fileName) {
   store.WB = {}; store.ROLE = {};
-  (rec.selected || parsed.names).forEach(name => {
+  (selected && selected.length ? selected : parsed.names).forEach(name => {
     const rows = parsed.sheets[name]; if (!rows) return;
     store.WB[name] = rows;
     const role = roleOf(rows.length ? Object.keys(rows[0]) : []);
     if (role && !store.ROLE[role]) store.ROLE[role] = name;
   });
-  store.fileName = rec.name;
+  store.fileName = fileName || '';
   store.RF = store.ROLE.fac ? buildRF(store.WB[store.ROLE.fac]) : null;
   store.BO = store.ROLE.sug ? buildBO(store.WB[store.ROLE.sug]) : [];
   if (store.ROLE.rss) buildRSS(store.WB[store.ROLE.rss]);
+}
+
+/* reconstruye el último archivo guardado localmente (IndexedDB) */
+export async function restoreSaved() {
+  let rec; try { rec = await kvGet('file'); } catch (e) { return false; }
+  if (!rec || !rec.buf) return false;
+  const parsed = await parseWorkbook(rec.buf);
+  buildFromParsed(parsed, rec.selected, rec.name);
   return true;
+}
+
+/* restaura el último archivo ACTIVO desde Supabase (visible en otros dispositivos).
+   Si no hay o falla, cae al archivo local. Devuelve 'supabase' | 'local' | false. */
+export async function restoreShared() {
+  try {
+    const meta = await latestPortalUpload();
+    if (meta && meta.storage_path) {
+      const buf = await downloadPortalFile(meta.storage_path);
+      if (buf) {
+        const parsed = await parseWorkbook(buf);
+        buildFromParsed(parsed, meta.selected || [], meta.file_name || meta.name);
+        // cachear local para arranques siguientes más rápidos
+        kvSet('file', { name: meta.file_name || meta.name, selected: meta.selected || [], buf }).catch(() => {});
+        return 'supabase';
+      }
+    }
+  } catch (e) { /* cae a local */ }
+  return (await restoreSaved()) ? 'local' : false;
 }
 export async function forgetSaved() {
   try { await kvDel('file'); } catch (e) {}

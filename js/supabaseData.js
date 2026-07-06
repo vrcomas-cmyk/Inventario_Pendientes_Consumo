@@ -37,34 +37,45 @@ const BUCKET = 'portal-uploads';
 export async function uploadPortalFile(buf, meta) {
   const c = sb(); if (!c) return null;
   try {
-    const safe = (meta.fileName || 'archivo').replace(/[^\w.\-]+/g, '_').slice(0, 60);
-    const path = `${Date.now()}_${safe}.xlsx`;
+    const base = (meta.fileName || 'archivo').replace(/\.xlsx?$/i, '').replace(/[^\w.\-]+/g, '_').slice(0, 60);
+    const path = `${Date.now()}_${base}.xlsx`;
     const up = await c.storage.from(BUCKET).upload(path, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), { upsert: true });
     if (up.error) return null;
-    // desactivar el activo anterior y registrar el nuevo como activo
-    await c.from('portal_uploads').update({ is_active: false }).eq('is_active', true);
-    const ins = await c.from('portal_uploads').insert({
-      name: meta.name || meta.fileName || 'Archivo',
-      file_name: meta.fileName || null,
-      storage_path: path,
-      selected: meta.selected || [],
-      roles: meta.roles || {},
-      size_bytes: (buf && buf.byteLength) || null,
-      uploaded_by: meta.uploadedBy || null,
-      is_active: true,
-    }).select('id').single();
-    return ins.error ? null : (ins.data && ins.data.id);
+    // registrar metadatos (best-effort; el bucket es la fuente de verdad)
+    try {
+      await c.from('portal_uploads').update({ is_active: false }).eq('is_active', true);
+      await c.from('portal_uploads').insert({
+        name: meta.name || meta.fileName || 'Archivo',
+        file_name: meta.fileName || null,
+        storage_path: path,
+        selected: meta.selected || [],
+        roles: meta.roles || {},
+        size_bytes: (buf && buf.byteLength) || null,
+        uploaded_by: meta.uploadedBy || null,
+        is_active: true,
+      });
+    } catch (e) { /* si falla el metadato, el archivo sigue accesible por Storage */ }
+    return path;
   } catch (e) { return null; }
 }
 
 export async function latestPortalUpload() {
   const c = sb(); if (!c) return null;
+  // 1) preferir la tabla de metadatos (trae hojas/roles/fecha)
   try {
     const { data, error } = await c.from('portal_uploads')
       .select('id,name,file_name,storage_path,selected,roles,size_bytes,uploaded_at')
       .eq('is_active', true).order('uploaded_at', { ascending: false }).limit(1);
+    if (!error && data && data.length) return data[0];
+  } catch (e) { /* sigue al respaldo */ }
+  // 2) respaldo: listar el bucket y tomar el más reciente (prefijo timestamp) —
+  //    garantiza visibilidad multi-dispositivo aunque el metadato no se haya guardado
+  try {
+    const { data, error } = await c.storage.from(BUCKET).list('', { limit: 1000 });
     if (error || !data || !data.length) return null;
-    return data[0];
+    const files = data.filter(f => f.name && /\.xlsx$/i.test(f.name)).sort((a, b) => (a.name < b.name ? 1 : -1));
+    if (!files.length) return null;
+    return { storage_path: files[0].name, selected: [], roles: {}, file_name: files[0].name, uploaded_at: files[0].name.split('_')[0] };
   } catch (e) { return null; }
 }
 

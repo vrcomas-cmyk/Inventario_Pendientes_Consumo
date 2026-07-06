@@ -120,7 +120,9 @@ function loadSelected() {
   // guardar localmente (rápido) y en Supabase (multi-dispositivo). Ninguno bloquea la UI.
   if (PENDING.buf) {
     kvSet('file', { name: PENDING.name, selected, buf: PENDING.buf }).catch(() => {});
-    uploadPortalFile(PENDING.buf, { name: PENDING.name, fileName: PENDING.name, selected, roles: store.ROLE }).catch(() => {});
+    uploadPortalFile(PENDING.buf, { name: PENDING.name, fileName: PENDING.name, selected, roles: store.ROLE })
+      .then(path => { if (path) kvSet('file', { name: PENDING.name, selected, buf: PENDING.buf, marker: 'sb:' + path }).catch(() => {}); })
+      .catch(() => {});
   }
   closeModal();
   onReadyCb();
@@ -151,17 +153,25 @@ export async function restoreSaved() {
 }
 
 /* restaura el último archivo ACTIVO desde Supabase (visible en otros dispositivos).
-   Si no hay o falla, cae al archivo local. Devuelve 'supabase' | 'local' | false. */
+   Usa un marcador para no re-descargar el mismo archivo (importante en celular).
+   Devuelve 'supabase' | 'supabase-cache' | 'local' | false. */
 export async function restoreShared() {
   try {
     const meta = await latestPortalUpload();
     if (meta && meta.storage_path) {
+      const marker = 'sb:' + meta.storage_path;
+      let localRec = null; try { localRec = await kvGet('file'); } catch (e) {}
+      // si ya tenemos ese mismo archivo en caché local, no volvemos a bajar 36 MB
+      if (localRec && localRec.buf && localRec.marker === marker) {
+        const parsed = await parseWorkbook(localRec.buf);
+        buildFromParsed(parsed, localRec.selected, localRec.name);
+        return 'supabase-cache';
+      }
       const buf = await downloadPortalFile(meta.storage_path);
       if (buf) {
         const parsed = await parseWorkbook(buf);
         buildFromParsed(parsed, meta.selected || [], meta.file_name || meta.name);
-        // cachear local para arranques siguientes más rápidos
-        kvSet('file', { name: meta.file_name || meta.name, selected: meta.selected || [], buf }).catch(() => {});
+        kvSet('file', { name: meta.file_name || meta.name, selected: meta.selected || [], buf, marker }).catch(() => {});
         return 'supabase';
       }
     }

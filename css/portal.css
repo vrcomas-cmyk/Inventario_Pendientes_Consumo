@@ -185,3 +185,48 @@ th.sortable:hover{color:var(--tx)}
 .crumb.cur{cursor:default;color:var(--mut)}
 .crumb.cur:hover{text-decoration:none}
 .csep{color:var(--mut);opacity:.6}
+
+/* ===================== MÓVIL (≤640px) ===================== */
+@media (max-width:640px){
+  .wrap{padding:10px 10px}
+  /* Encabezado y pestañas: apilar y permitir scroll horizontal de tabs */
+  header,.topbar{flex-wrap:wrap}
+  .tabs{margin-left:0;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+  .tabs::-webkit-scrollbar{height:0}
+  .tab{flex:0 0 auto;font-size:13px;padding:8px 10px}
+  /* KPIs en 2 columnas */
+  .kpis{grid-template-columns:repeat(2,1fr);gap:8px;margin:6px 0 10px}
+  .kpi{padding:10px}
+  .kpi .v{font-size:18px}
+  /* Tablas: fuente y padding compactos, scroll horizontal fluido */
+  .tbl{max-height:none;-webkit-overflow-scrolling:touch}
+  table{font-size:12px}
+  th,td{padding:6px 7px}
+  /* Modales a pantalla casi completa */
+  .ov{padding:0}
+  .modal{border-radius:0;min-height:100vh;max-width:100%;padding:14px 12px}
+  .modal .x{font-size:26px;padding:4px}
+  .card,.tablecard{padding:10px}
+  /* Toolbar apilada y campos a ancho completo */
+  .toolbar{padding:8px}
+  .toolbar input,.toolbar select,.toolbar .fsearch{width:100%;min-width:0;flex:1 1 100%}
+  /* Toggles y breadcrumb sin desbordar */
+  .segm{flex-wrap:wrap}
+  .seg{flex:1 1 auto;text-align:center}
+  .bcrumb{gap:6px}
+  .ctrail{font-size:11px}
+  /* Botones cómodos para el dedo */
+  .btn{padding:9px 12px}
+  /* Chips de filtro */
+  .chip{font-size:12px}
+  /* Gráficas más bajas para que quepan */
+  .chartbox{height:200px!important}
+}
+
+/* Pantallas muy chicas (≤380px): KPIs en 1 columna */
+@media (max-width:380px){
+  .kpis{grid-template-columns:1fr}
+}
+
+/* Mejor desplazamiento táctil en todos los contenedores con scroll */
+.tbl,.wrap,.ov{-webkit-overflow-scrolling:touch}

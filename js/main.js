@@ -8,6 +8,7 @@ import { renderConsumo } from './consumo.js';
 import { renderResumenSin } from './resumenSin.js';
 import { renderAnalisis } from './analisis.js';
 import { renderCotizador } from './cotizador.js';
+import { store } from './store.js';
 import { openModal, closeModal } from './ui.js';
 import { loadEnrich } from './enrich.js';
 import { initAuth, login as sbLogin, isAdmin, canUpload, canVer, isLoggedIn, currentEmail, onAuthChange } from './authSupabase.js';
@@ -95,10 +96,23 @@ function boot() {
   const ab = document.createElement('button');
   ab.id = 'btnAdmin'; ab.className = 'btn'; ab.textContent = '🔐 Iniciar sesión';
   ab.onclick = adminPanel; top.appendChild(ab);
+  // botón actualizar datos + chip de frescura
+  const rb = document.createElement('button');
+  rb.id = 'btnRefresh'; rb.className = 'btn'; rb.title = 'Buscar datos nuevos en Supabase';
+  rb.textContent = '🔄 Actualizar'; top.appendChild(rb);
+  const chip = document.createElement('span');
+  chip.id = 'dataChip'; chip.className = 'datachip'; chip.textContent = 'Cargando datos…'; top.appendChild(chip);
+  rb.onclick = async () => {
+    rb.disabled = true; rb.textContent = '⏳ Buscando…'; store._manual = false;
+    const ok = await restoreShared().catch(() => false);
+    rb.disabled = false; rb.textContent = '🔄 Actualizar';
+    if (ok) { buildTabs(); render(); }
+    syncDataChip(ok ? 'Datos actualizados' : 'Sin cambios');
+  };
 
   buildTabs();
   document.querySelector('#btnUpload').addEventListener('click', openUploader);
-  initUpload(() => { buildTabs(); syncAdminUI(); render(); });
+  initUpload(() => { buildTabs(); syncAdminUI(); syncDataChip(); render(); });
   document.querySelector('#ov').addEventListener('click', e => { if (e.target.id === 'ov') closeModal(); });
   syncAdminUI();
   render();
@@ -109,11 +123,27 @@ function boot() {
 
   ensureInvData();
   loadEnrich(false).then(() => render());
-  // restaurar archivo activo (Supabase multi-dispositivo → local); si no hay, armar desde vistas
+  // restaurar archivo activo (Supabase multi-dispositivo → local)
   restoreShared().then(async ok => {
     if (!ok) ok = await loadReportsFromSupabase().catch(() => false);
     if (ok) { buildTabs(); render(); }
-  }).catch(() => {});
+    syncDataChip();
+  }).catch(() => syncDataChip());
+}
+
+/* chip con la frescura de cada reporte (tipo · fecha de subida) */
+const TYPE_LBL = { sug: 'Sugerencias', cons: 'Consumo', fac: 'Facturación', rss: 'Resumen Sin Sug.', multi: 'Archivo' };
+function syncDataChip(msg) {
+  const chip = document.querySelector('#dataChip'); if (!chip) return;
+  const info = store.DATAINFO;
+  if (info && info.length) {
+    chip.innerHTML = info.filter(i => i.type !== 'multi').map(i => {
+      const d = i.at ? new Date(i.at) : null;
+      const f = d ? d.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '';
+      return `<span title="${(i.file || '')}">${TYPE_LBL[i.type] || i.type} <b>${f}</b></span>`;
+    }).join(' · ');
+  } else chip.textContent = msg || (store.fileName ? store.fileName : 'Sin datos cargados');
+  if (msg) { chip.dataset.flash = '1'; setTimeout(() => { delete chip.dataset.flash; syncDataChip(); }, 1800); }
 }
 
 boot();

@@ -16,9 +16,13 @@ export function openModal(html) {
     const card = inp.closest('.tablecard, .card') || m;
     const tbl = card.querySelector('table');
     if (!tbl) return;
+    let tmr;
     inp.addEventListener('input', () => {
-      const q = inp.value.toLowerCase().trim();
-      tbl.querySelectorAll('tbody tr').forEach(tr => { tr.style.display = (!q || tr.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
+      clearTimeout(tmr);
+      tmr = setTimeout(() => {
+        const q = inp.value.toLowerCase().trim();
+        tbl.querySelectorAll('tbody tr').forEach(tr => { tr.style.display = (!q || tr.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
+      }, 120);
     });
   });
   makeModalTablesSortable(m);

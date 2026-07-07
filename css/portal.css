@@ -237,3 +237,32 @@ th.sortable:hover{color:var(--tx)}
 .factbar span{white-space:nowrap}
 .factbar b{color:var(--mut);font-weight:600;margin-right:4px;font-size:11px;text-transform:uppercase;letter-spacing:.03em}
 @media (max-width:640px){ .factbar{flex-direction:column;gap:4px} .factbar span{white-space:normal} }
+
+/* ===================== Pulido visual e interactivo ===================== */
+/* Chip de frescura de datos */
+.datachip{display:inline-flex;flex-wrap:wrap;gap:4px 10px;align-items:center;font-size:11px;color:var(--mut);background:var(--panel2);border:1px solid var(--bd);border-radius:999px;padding:4px 12px;margin-left:8px;max-width:46vw;overflow:hidden}
+.datachip b{color:var(--fg)}
+.datachip[data-flash]{border-color:var(--acc,#8bc53f);color:var(--acc,#8bc53f)}
+@media (max-width:640px){ .datachip{max-width:100%;margin:6px 0 0} }
+
+/* Botones: transición y estado activo */
+.btn{transition:background .15s ease, border-color .15s ease, transform .05s ease}
+.btn:hover{border-color:var(--acc,#8bc53f)}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+
+/* Filas y enlaces */
+tbody tr{transition:background .12s ease}
+tbody tr.click:hover{background:rgba(139,197,63,.06)}
+.lnk{transition:color .12s ease}
+.tab{transition:background .15s ease, color .15s ease}
+
+/* Modal: aparición suave */
+.ov.show .modal{animation:modalIn .18s ease}
+@keyframes modalIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* Accesibilidad: foco visible en inputs/botones */
+.btn:focus-visible, input:focus-visible, select:focus-visible{outline:2px solid var(--acc,#8bc53f);outline-offset:1px}
+
+/* Menos brincos: reservar altura de gráficas */
+.chartbox{min-height:190px}

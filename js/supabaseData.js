@@ -52,6 +52,8 @@ export async function uploadPortalFile(buf, meta) {
           size_bytes: (buf && buf.byteLength) || null, is_active: true,
         });
       }
+      // los tipos específicos superan al archivo completo legado ('multi')
+      if (!types.includes('multi')) await c.from('portal_uploads').update({ is_active: false }).eq('report_type', 'multi').eq('is_active', true);
     } catch (e) { /* el archivo sigue accesible por Storage */ }
     return path;
   } catch (e) { return null; }

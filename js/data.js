@@ -138,11 +138,18 @@ function loadSelected() {
   // guardar para próximas sesiones (no bloquea la UI)
   // tipos de reporte presentes (cada uno reemplaza SOLO su tipo en Supabase)
   const types = Object.keys(store.ROLE).filter(Boolean);
+  store._manual = true;                             // esta sesión manda: restoreShared no debe pisarla
   // guardar localmente (rápido) y en Supabase por tipo (multi-dispositivo). No bloquea la UI.
   if (PENDING.buf) {
     kvSet('file', { name: PENDING.name, selected, buf: PENDING.buf }).catch(() => {});
     uploadPortalFile(PENDING.buf, { name: PENDING.name, fileName: PENDING.name, selected, roles: store.ROLE, types: types.length ? types : ['multi'] })
-      .then(path => { if (path) kvSet('file', { name: PENDING.name, selected, buf: PENDING.buf, marker: 'sb:' + path }).catch(() => {}); })
+      .then(async path => {
+        if (!path) return;
+        // refrescar la caché por tipo con este mismo buffer (no re-descargar después)
+        try { const cache = (await kvGet('byType')) || {}; const marker = 'sb:' + path;
+          (types.length ? types : ['multi']).forEach(t => { cache[t] = { marker, buf: PENDING.buf }; });
+          kvSet('byType', cache).catch(() => {}); } catch (e) {}
+      })
       .catch(() => {});
   }
   // Resumen_Fac → tabla mensual (reemplaza) para comparativos/tendencia. Solo admin.
@@ -195,12 +202,15 @@ export async function restoreSaved() {
    reemplaza por separado). Usa caché por tipo para no re-descargar lo que no cambió.
    Devuelve 'supabase' | 'local' | false. */
 export async function restoreShared() {
+  if (store._manual) return false;                 // el usuario ya cargó un archivo en esta sesión: no pisar
   try {
     const byType = await latestActiveByType();
     if (byType && byType.size) {
       let cache = {}; try { cache = (await kvGet('byType')) || {}; } catch (e) {}
-      const merged = {}; const roles = {}; const newCache = {}; let names = [];
-      for (const [type, rec] of byType) {
+      const merged = {}; const roles = {}; const newCache = {}; let names = []; const info = [];
+      // 'multi' (archivo completo legado) primero, para que los tipos específicos lo SOBREESCRIBAN
+      const entries = [...byType.entries()].sort((a, b) => (a[0] === 'multi' ? -1 : b[0] === 'multi' ? 1 : 0));
+      for (const [type, rec] of entries) {
         const marker = 'sb:' + rec.storage_path;
         let buf = null;
         if (cache[type] && cache[type].marker === marker && cache[type].buf) buf = cache[type].buf;   // sin cambios → caché
@@ -208,13 +218,16 @@ export async function restoreShared() {
         if (!buf) continue;
         newCache[type] = { marker, buf };
         names.push(rec.file_name || type);
+        info.push({ type, file: rec.file_name || '', at: rec.uploaded_at || '' });
         const parsed = await parseWorkbook(buf);
         const use = (rec.selected && rec.selected.length) ? rec.selected : parsed.names;
         use.forEach(n => { const rows = parsed.sheets[n]; if (!rows) return; merged[n] = rows;
-          const role = roleOf(rows.length ? Object.keys(rows[0]) : []); if (role && !roles[role]) roles[role] = n; });
+          const role = roleOf(rows.length ? Object.keys(rows[0]) : []); if (role) roles[role] = n; });  // el último (más específico) gana
       }
       if (Object.keys(merged).length) {
-        store.WB = merged; store.ROLE = roles; store.fileName = names.join(' + ');
+        if (store._manual) return false;           // guard por si el usuario subió mientras descargábamos
+        store.WB = merged; store.ROLE = roles; store.fileName = [...new Set(names)].join(' + ');
+        store.DATAINFO = info;
         store.RF = store.ROLE.fac ? buildRF(store.WB[store.ROLE.fac]) : null;
         store.BO = store.ROLE.sug ? buildBO(store.WB[store.ROLE.sug]) : [];
         if (store.ROLE.rss) buildRSS(store.WB[store.ROLE.rss]);

@@ -221,8 +221,18 @@ function exportSug() {
 }
 
 /* encabezado: solicitante › razón social › destinatario */
-const cabecera = b => `<h2>${esc(b[C.solic])} › ${esc(b[C.razon])} › ${esc(b[C.dest])}</h2>
-  <p class="muted">Solicitante › Razón social › Destinatario</p>`;
+const cabecera = b => `<div class="detail-head">📋 Detalle de sugerencia / BO</div>
+  <h2>${esc(b[C.solic])} › ${esc(b[C.razon])} › ${esc(b[C.dest])}</h2>
+  <p class="muted">Solicitante › Razón social › Destinatario</p>
+  <div class="factbar">
+    <span><b>Pedido</b> ${esc(b[C.pedido]) || '—'}</span>
+    <span><b>OC</b> ${esc(b[C.oc]) || '—'}</span>
+    <span><b>Fecha pedido</b> ${esc(b[C.fecha]) || '—'}</span>
+    <span><b>Material</b> ${esc(b[C.matBase]) || '—'} · ${esc(b[C.descSol]) || ''}</span>
+    <span><b>Ejecutivo</b> ${esc(ejecDe(b)) || '—'}</span>
+    <span><b>Grupo cliente</b> ${esc(grupoCli(b)) || '—'}</span>
+    <span><b>Centro/Alm</b> ${esc(b[C.centro]) || '—'}${norm(b[C.alm]) ? ' / ' + esc(b[C.alm]) : ''}</span>
+  </div>`;
 
 function consumoHTML(cons, status) {
   const st = status || (cons && cons.tnd);
@@ -258,8 +268,18 @@ export function openPedido(pedido) {
   }).join('');
   openModal(`
     ${backBtn()}<button class="x" onclick="closeModal()">×</button>
+    <div class="detail-head">🧾 Detalle del pedido</div>
     <h2>Pedido ${esc(pedido)}</h2>
     <p class="muted">${esc(b0[C.razon])} · OC ${esc(b0[C.oc]) || '—'} · ${items.length} material(es)</p>
+    <div class="factbar">
+      <span><b>Pedido</b> ${esc(pedido)}</span>
+      <span><b>OC</b> ${esc(b0[C.oc]) || '—'}</span>
+      <span><b>Fecha pedido</b> ${esc(b0[C.fecha]) || '—'}</span>
+      <span><b>Cliente</b> ${esc(b0[C.razon]) || '—'}</span>
+      <span><b>Ejecutivo</b> ${esc(ejecDe(b0)) || '—'}</span>
+      <span><b>Grupo cliente</b> ${esc(grupoCli(b0)) || '—'}</span>
+      <span><b>Solic/Dest</b> ${esc(b0[C.solic])} / ${esc(b0[C.dest])}</span>
+    </div>
     <div class="mkpis">
       <div class="stat"><div class="l">Materiales</div><div class="v">${items.length}</div></div>
       <div class="stat"><div class="l">Cant. pendiente</div><div class="v">${fmt(pendTot)}</div></div>

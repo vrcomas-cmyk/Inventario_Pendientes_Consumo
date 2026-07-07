@@ -20,9 +20,11 @@ self.onmessage = function (ev) {
   try {
     if (typeof XLSX === 'undefined') { self.postMessage({ ok: false, error: 'XLSX no disponible en worker' }); return; }
     const wb = XLSX.read(ev.data, { type: 'array', cellDates: false });
-    const sheets = {};
-    wb.SheetNames.forEach(n => { const ws = wb.Sheets[n]; fixRange(ws); sheets[n] = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true }); });
-    self.postMessage({ ok: true, names: wb.SheetNames, sheets });
+    const sheets = {}, grids = {};
+    wb.SheetNames.forEach(n => { const ws = wb.Sheets[n]; fixRange(ws);
+      sheets[n] = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true });
+      grids[n] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true }); });
+    self.postMessage({ ok: true, names: wb.SheetNames, sheets, grids });
   } catch (e) {
     self.postMessage({ ok: false, error: String((e && e.message) || e) });
   }

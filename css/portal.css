@@ -230,3 +230,10 @@ th.sortable:hover{color:var(--tx)}
 
 /* Mejor desplazamiento táctil en todos los contenedores con scroll */
 .tbl,.wrap,.ov{-webkit-overflow-scrolling:touch}
+
+/* Encabezado de "qué estás viendo" + barra de datos clave en detalles */
+.detail-head{display:inline-block;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--acc,#8bc53f);background:rgba(139,197,63,.10);border:1px solid rgba(139,197,63,.25);padding:3px 10px;border-radius:999px;margin-bottom:8px}
+.factbar{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0 12px;padding:10px 12px;background:var(--panel2);border:1px solid var(--bd);border-radius:10px;font-size:12.5px}
+.factbar span{white-space:nowrap}
+.factbar b{color:var(--mut);font-weight:600;margin-right:4px;font-size:11px;text-transform:uppercase;letter-spacing:.03em}
+@media (max-width:640px){ .factbar{flex-direction:column;gap:4px} .factbar span{white-space:normal} }

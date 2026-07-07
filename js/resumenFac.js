@@ -9,6 +9,7 @@ import { store, RFC } from './store.js';
 export function buildRF(rows) {
   const matDest = new Map(), solic = new Map(), dest = new Map(), mat = new Map();
   const solicMats = new Map(), destMats = new Map(), matTexto = new Map(), solicRazon = new Map();
+  const solicGpoV = new Map(), solicGpoC = new Map();
   const matMinYr = new Map();
   let maxk = 0, maxmes = '';
 
@@ -39,6 +40,8 @@ export function buildRF(rows) {
     add2(destMats, d, m, mes, c, i);
     if (m && !matTexto.has(m)) matTexto.set(m, norm(r[RFC.texto]));
     if (s && !solicRazon.has(s)) solicRazon.set(s, norm(r[RFC.razon]));
+    if (s && !solicGpoV.has(s) && norm(r['Gpo. Vdor.'])) solicGpoV.set(s, norm(r['Gpo. Vdor.']));
+    if (s && !solicGpoC.has(s) && norm(r['Gpo. Cte.'])) solicGpoC.set(s, norm(r['Gpo. Cte.']));
     // precio mínimo unitario facturado en el año corriente
     if (m && c > 0 && (mes.split('/')[1] || '').trim() === curYear) {
       const u = i / c; const prev = matMinYr.get(m);
@@ -56,7 +59,7 @@ export function buildRF(rows) {
   store.FACROWS = rows;
   return {
     matDest: ser(matDest), solic: ser(solic), dest: ser(dest), mat: ser(mat),
-    solicMats: ser2(solicMats), destMats: ser2(destMats), matTexto, solicRazon, matMinYr, curmes: maxmes,
+    solicMats: ser2(solicMats), destMats: ser2(destMats), matTexto, solicRazon, solicGpoV, solicGpoC, matMinYr, curmes: maxmes,
   };
 }
 export const serieMaterial = m => store.RF ? (store.RF.mat.get(norm(m)) || []) : [];
@@ -282,17 +285,22 @@ export function mesLabel(m) {
    - Si está comprando: compara los últimos 3 meses (rellenando ceros hasta el
      mes corriente) contra los 3 previos.
    --------------------------------------------------------------------------- */
-export function tendenciaTexto(serie) {
+/* Tendencia por PERIODO: compara el promedio de los últimos `meses` meses
+   COMPLETOS contra los `meses` anteriores. Ignora el mes en curso (incompleto),
+   por eso ya no marca "a la baja" solo porque el mes corriente arranca en cero. */
+export const TREND_MESES = 3;
+export function tendenciaTexto(serie, meses = TREND_MESES) {
   if (!serie || !serie.length) return { dir: 'flat', txt: 'Sin datos' };
-  const dias = diasDesdeUltimo(serie);
-  if (dias > 60) return { dir: 'down', txt: 'En decremento' };   // dejó de comprar
-  const cur = mesKey(store.CURMES);
+  const refK = mesKey(mesAnterior(hoyMes()));      // último mes COMPLETO
   const valAt = k => { const f = serie.find(s => mesKey(s.mes) === k); return f ? f.imp : 0; };
-  const actual = valAt(cur);
-  const avgPrev = (valAt(cur - 1) + valAt(cur - 2) + valAt(cur - 3)) / 3;
-  if (avgPrev === 0) return actual > 0 ? { dir: 'up', txt: 'En aumento' } : { dir: 'flat', txt: 'Estable' };
-  if (actual > avgPrev * 1.1) return { dir: 'up',   txt: 'En aumento' };
-  if (actual < avgPrev * 0.9) return { dir: 'down', txt: 'En decremento' };
+  let a = 0, b = 0;
+  for (let i = 0; i < meses; i++) { a += valAt(refK - i); b += valAt(refK - meses - i); }
+  if (a === 0 && b === 0) return { dir: 'flat', txt: 'Sin movimiento' };
+  if (b === 0) return { dir: 'up', txt: 'En aumento' };
+  if (a === 0) return { dir: 'down', txt: 'En decremento' };
+  const r = a / b;
+  if (r > 1.1) return { dir: 'up', txt: 'En aumento' };
+  if (r < 0.9) return { dir: 'down', txt: 'En decremento' };
   return { dir: 'flat', txt: 'Estable' };
 }
 

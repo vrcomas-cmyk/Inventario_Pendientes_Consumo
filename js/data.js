@@ -8,7 +8,8 @@ import { buildRSS } from './resumenSin.js';
 import { buildBO } from './sugerencias.js';
 import { openModal, closeModal } from './ui.js';
 import { kvSet, kvGet, kvDel } from './persist.js';
-import { uploadPortalFile, latestPortalUpload, downloadPortalFile } from './supabaseData.js';
+import { uploadPortalFile, latestActiveByType, downloadPortalFile, ingestFacturacion, readView, VIEWS } from './supabaseData.js';
+import { isAdmin } from './authSupabase.js';
 
 /* recalcula el rango real de la hoja (algunos exports traen !ref truncado,
    por eso "se cargan" menos filas de las que tiene el archivo) */
@@ -45,6 +46,20 @@ export function initUpload(onReady) {
 }
 export function openUploader() { document.querySelector('#fileInput').click(); }
 
+/* Vuelca la facturación mensual a Supabase con barra de progreso (admin). */
+async function ingestarFacturacion(rows) {
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:200;background:var(--panel);border:1px solid var(--bd2);border-radius:10px;padding:12px 14px;min-width:240px;box-shadow:0 6px 20px #0007';
+  host.innerHTML = '<div style="font-size:13px;margin-bottom:6px">☁️ Guardando facturación en Supabase…</div><div style="height:8px;background:var(--panel2);border-radius:5px;overflow:hidden"><div id="ingBar" style="height:100%;width:0;background:var(--acc,#8bc53f)"></div></div><div id="ingTxt" class="muted" style="font-size:11px;margin-top:4px">0%</div>';
+  document.body.appendChild(host);
+  const bar = host.querySelector('#ingBar'), txt = host.querySelector('#ingTxt');
+  const res = await ingestFacturacion(rows, (done, total) => {
+    const p = Math.round(done / total * 100); bar.style.width = p + '%'; txt.textContent = `${done.toLocaleString('es-MX')} / ${total.toLocaleString('es-MX')} (${p}%)`;
+  });
+  txt.textContent = res.ok ? `✔ ${res.done.toLocaleString('es-MX')} filas guardadas` : `⚠️ ${res.error || 'error'}`;
+  setTimeout(() => host.remove(), res.ok ? 3000 : 8000);
+}
+
 function readFile(f) {
   const r = new FileReader();
   r.onload = async e => {
@@ -66,15 +81,19 @@ function getWorker() {
 }
 function parseSync(buf) {
   const wb = XLSX.read(buf, { type: 'array', cellDates: false });
-  const sheets = {}; wb.SheetNames.forEach(n => { sheets[n] = sheetRows(wb.Sheets[n]); });
-  return { names: wb.SheetNames, sheets };
+  const sheets = {}, grids = {};
+  wb.SheetNames.forEach(n => { sheets[n] = sheetRows(wb.Sheets[n]); grids[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: '', raw: true }); });
+  return { names: wb.SheetNames, sheets, grids };
 }
+/* parseo reutilizable: ArrayBuffer → { names, sheets }. Usado por el cotizador. */
+export function parseArrayBuffer(buf) { return parseWorkbook(buf); }
+
 function parseWorkbook(buf) {
   return new Promise(resolve => {
     const w = getWorker();
     if (!w) { resolve(parseSync(buf)); return; }
     const done = res => { w.removeEventListener('message', onMsg); w.removeEventListener('error', onErr); resolve(res); };
-    const onMsg = ev => { (ev.data && ev.data.ok) ? done({ names: ev.data.names, sheets: ev.data.sheets }) : done(parseSync(buf)); };
+    const onMsg = ev => { (ev.data && ev.data.ok) ? done({ names: ev.data.names, sheets: ev.data.sheets, grids: ev.data.grids }) : done(parseSync(buf)); };
     const onErr = () => { _workerBad = true; _worker = null; done(parseSync(buf)); };
     w.addEventListener('message', onMsg); w.addEventListener('error', onErr);
     try { w.postMessage(buf); } catch (e) { done(parseSync(buf)); }
@@ -117,18 +136,38 @@ function loadSelected() {
   store.BO = store.ROLE.sug ? buildBO(store.WB[store.ROLE.sug]) : [];
   if (store.ROLE.rss) buildRSS(store.WB[store.ROLE.rss]);
   // guardar para próximas sesiones (no bloquea la UI)
-  // guardar localmente (rápido) y en Supabase (multi-dispositivo). Ninguno bloquea la UI.
+  // tipos de reporte presentes (cada uno reemplaza SOLO su tipo en Supabase)
+  const types = Object.keys(store.ROLE).filter(Boolean);
+  // guardar localmente (rápido) y en Supabase por tipo (multi-dispositivo). No bloquea la UI.
   if (PENDING.buf) {
     kvSet('file', { name: PENDING.name, selected, buf: PENDING.buf }).catch(() => {});
-    uploadPortalFile(PENDING.buf, { name: PENDING.name, fileName: PENDING.name, selected, roles: store.ROLE })
+    uploadPortalFile(PENDING.buf, { name: PENDING.name, fileName: PENDING.name, selected, roles: store.ROLE, types: types.length ? types : ['multi'] })
       .then(path => { if (path) kvSet('file', { name: PENDING.name, selected, buf: PENDING.buf, marker: 'sb:' + path }).catch(() => {}); })
       .catch(() => {});
+  }
+  // Resumen_Fac → tabla mensual (reemplaza) para comparativos/tendencia. Solo admin.
+  if (isAdmin() && store.ROLE.fac && store.WB[store.ROLE.fac] && store.WB[store.ROLE.fac].length) {
+    ingestarFacturacion(store.WB[store.ROLE.fac]);
   }
   closeModal();
   onReadyCb();
 }
 
-/* construye el store a partir de un workbook ya parseado */
+/* Arma Sugerencias / Consumo / RSS directamente desde las vistas de Supabase
+   (datos vivos, sin necesidad de Excel). La facturación mensual (comparativos)
+   se mantiene por el archivo activo / RPC. Devuelve true si cargó algo. */
+export async function loadReportsFromSupabase() {
+  let sug, cons, rss;
+  try { [sug, cons, rss] = await Promise.all([readView(VIEWS.sug), readView(VIEWS.cons), readView(VIEWS.rss)]); }
+  catch (e) { return false; }
+  if (!(sug && sug.length) && !(cons && cons.length) && !(rss && rss.length)) return false;
+  store.WB = store.WB || {}; store.ROLE = store.ROLE || {};
+  if (sug && sug.length)  { store.WB['Sugerencias'] = sug;  store.ROLE.sug = 'Sugerencias';  store.BO = buildBO(sug); }
+  if (cons && cons.length) { store.WB['Consumo'] = cons;     store.ROLE.cons = 'Consumo'; }
+  if (rss && rss.length)  { store.WB['RSS'] = rss;           store.ROLE.rss = 'RSS';          buildRSS(rss); }
+  if (!store.fileName) store.fileName = 'Supabase (vistas)';
+  return true;
+}
 function buildFromParsed(parsed, selected, fileName) {
   store.WB = {}; store.ROLE = {};
   (selected && selected.length ? selected : parsed.names).forEach(name => {
@@ -152,26 +191,34 @@ export async function restoreSaved() {
   return true;
 }
 
-/* restaura el último archivo ACTIVO desde Supabase (visible en otros dispositivos).
-   Usa un marcador para no re-descargar el mismo archivo (importante en celular).
-   Devuelve 'supabase' | 'supabase-cache' | 'local' | false. */
+/* Restaura el ÚLTIMO archivo de CADA tipo de reporte desde Supabase (cada uno se
+   reemplaza por separado). Usa caché por tipo para no re-descargar lo que no cambió.
+   Devuelve 'supabase' | 'local' | false. */
 export async function restoreShared() {
   try {
-    const meta = await latestPortalUpload();
-    if (meta && meta.storage_path) {
-      const marker = 'sb:' + meta.storage_path;
-      let localRec = null; try { localRec = await kvGet('file'); } catch (e) {}
-      // si ya tenemos ese mismo archivo en caché local, no volvemos a bajar 36 MB
-      if (localRec && localRec.buf && localRec.marker === marker) {
-        const parsed = await parseWorkbook(localRec.buf);
-        buildFromParsed(parsed, localRec.selected, localRec.name);
-        return 'supabase-cache';
-      }
-      const buf = await downloadPortalFile(meta.storage_path);
-      if (buf) {
+    const byType = await latestActiveByType();
+    if (byType && byType.size) {
+      let cache = {}; try { cache = (await kvGet('byType')) || {}; } catch (e) {}
+      const merged = {}; const roles = {}; const newCache = {}; let names = [];
+      for (const [type, rec] of byType) {
+        const marker = 'sb:' + rec.storage_path;
+        let buf = null;
+        if (cache[type] && cache[type].marker === marker && cache[type].buf) buf = cache[type].buf;   // sin cambios → caché
+        else buf = await downloadPortalFile(rec.storage_path);
+        if (!buf) continue;
+        newCache[type] = { marker, buf };
+        names.push(rec.file_name || type);
         const parsed = await parseWorkbook(buf);
-        buildFromParsed(parsed, meta.selected || [], meta.file_name || meta.name);
-        kvSet('file', { name: meta.file_name || meta.name, selected: meta.selected || [], buf, marker }).catch(() => {});
+        const use = (rec.selected && rec.selected.length) ? rec.selected : parsed.names;
+        use.forEach(n => { const rows = parsed.sheets[n]; if (!rows) return; merged[n] = rows;
+          const role = roleOf(rows.length ? Object.keys(rows[0]) : []); if (role && !roles[role]) roles[role] = n; });
+      }
+      if (Object.keys(merged).length) {
+        store.WB = merged; store.ROLE = roles; store.fileName = names.join(' + ');
+        store.RF = store.ROLE.fac ? buildRF(store.WB[store.ROLE.fac]) : null;
+        store.BO = store.ROLE.sug ? buildBO(store.WB[store.ROLE.sug]) : [];
+        if (store.ROLE.rss) buildRSS(store.WB[store.ROLE.rss]);
+        kvSet('byType', newCache).catch(() => {});
         return 'supabase';
       }
     }

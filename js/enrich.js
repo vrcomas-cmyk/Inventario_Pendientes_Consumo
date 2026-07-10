@@ -10,6 +10,7 @@
    =========================================================================== */
 import { norm } from './utils.js';
 import { fetchCatalogMaterials } from './supabaseData.js';
+import { fetchAppScriptTab, INV_CFG } from './invConfig.js';
 
 /* Mapa de Supabase (convive con el Google Sheet). Se prefiere Supabase para
    sector/grupo de artículo; ejecutivo y grupo-cliente-texto siguen del Sheet. */
@@ -25,9 +26,8 @@ async function loadSupabaseEnrich() {
   } catch (e) { /* sin Supabase → se usa el Sheet */ }
 }
 
-const SHEET_ID = '1AeDp_J7sC3PcM1duP3iXKd-VVtWm7g3d3HiSeoKdFTY';
-const TABS = { ejecutivos: 'Ejecutivos', materiales: 'Materiales' };
-const CACHE_KEY = 'enrich_v1';
+const TABS = { ejecutivos: INV_CFG.tabs.ejecutivos, materiales: INV_CFG.tabs.materiales };
+const CACHE_KEY = 'enrich_v2';   // v2: origen AppScript (invalida caché gviz vieja)
 
 let EJ = [], MAT = [], loaded = false, loading = false, lastErr = '';
 const mapGrupo = new Map(), mapEjec = new Map(), mapMat = new Map();
@@ -49,15 +49,8 @@ function addKey(map, v, val) { const k = normCode(v); if (k && !map.has(k)) map.
 function getKey(map, v) { return map.get(normCode(v)); }
 
 async function fetchTab(name) {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(name)}`;
-  const txt = await fetch(url).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + name); return r.text(); });
-  const json = JSON.parse(txt.substring(txt.indexOf('{'), txt.lastIndexOf('}') + 1));
-  const cols = json.table.cols.map((c, i) => norm(c.label) || ('col' + i));
-  return json.table.rows.map(r => {
-    const o = {};
-    (r.c || []).forEach((cell, i) => { o[cols[i]] = cell ? (cell.v != null ? cell.v : cell.f) : ''; });
-    return o;
-  });
+  // Antes: gviz (fallaba con IMPORTRANGE/permiso). Ahora: AppScript del libro Sync.
+  return fetchAppScriptTab(name);
 }
 
 function build() {

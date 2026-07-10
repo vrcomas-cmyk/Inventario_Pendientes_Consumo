@@ -2,19 +2,26 @@
    main.js · arranque y router de pestañas
    =========================================================================== */
 import { initUpload, openUploader, restoreShared, loadReportsFromSupabase } from './data.js';
-import { renderInventario, ensureInvData } from './inventario.js';
-import { renderSug } from './sugerencias.js';
-import { renderConsumo } from './consumo.js';
-import { renderResumenSin } from './resumenSin.js';
-import { renderAnalisis } from './analisis.js';
-import { renderCotizador } from './cotizador.js';
 import { store } from './store.js';
 import { openModal, closeModal } from './ui.js';
-import { loadEnrich } from './enrich.js';
 import { initAuth, login as sbLogin, isAdmin, canUpload, canVer, isLoggedIn, currentEmail, onAuthChange } from './authSupabase.js';
-import { openAdmin } from './admin.js';
+
+/* Carga perezosa por pestaña: cada vista se importa la primera vez que se abre.
+   Reduce el JS parseado al arranque (26 módulos → ~8). */
+const LOADERS = {
+  dash: () => import('./dashboard.js').then(m => m.renderDashboard),
+  inv:  () => import('./inventario.js').then(m => m.renderInventario),
+  sug:  () => import('./sugerencias.js').then(m => m.renderSug),
+  cons: () => import('./consumo.js').then(m => m.renderConsumo),
+  rss:  () => import('./resumenSin.js').then(m => m.renderResumenSin),
+  ana:  () => import('./analisis.js').then(m => m.renderAnalisis),
+  cot:  () => import('./cotizador.js').then(m => m.renderCotizador),
+};
+const RENDER_CACHE = {};
+async function renderer(id) { if (!RENDER_CACHE[id]) RENDER_CACHE[id] = await LOADERS[id](); return RENDER_CACHE[id]; }
 
 const TABS = [
+  { id: 'dash', label: '🏠 Inicio' },
   { id: 'inv',  label: '🏷️ Inventario (condición)' },
   { id: 'sug',  label: '📋 Sugerencias' },
   { id: 'cons', label: '📊 Reporte de consumo' },
@@ -23,32 +30,32 @@ const TABS = [
   { id: 'cot',  label: '🧾 Cotizador' },
 ];
 
-let current = 'inv';
+let current = 'dash';
 
 function allowedTabs() { return TABS.filter(t => canVer(t.id)); }
 
 function buildTabs() {
   const tb = document.querySelector('#tabs'); tb.innerHTML = '';
+  tb.setAttribute('role', 'tablist'); tb.setAttribute('aria-label', 'Secciones del portal');
   allowedTabs().forEach(t => {
     const b = document.createElement('button');
     b.className = 'tab'; b.dataset.id = t.id; b.textContent = t.label;
+    b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(t.id === current));
     b.onclick = () => switchTab(t.id);
     tb.appendChild(b);
   });
   if (!allowedTabs().some(t => t.id === current)) current = (allowedTabs()[0] || TABS[0]).id;
 }
 
-function render() {
-  ['inv', 'sug', 'cons', 'rss', 'ana', 'cot'].forEach(id => { const el = document.querySelector('#view-' + id); if (el) el.classList.toggle('hidden', id !== current); });
-  if (current === 'inv')  renderInventario(document.querySelector('#view-inv'));
-  if (current === 'sug')  renderSug(document.querySelector('#view-sug'));
-  if (current === 'cons') renderConsumo(document.querySelector('#view-cons'));
-  if (current === 'rss')  renderResumenSin(document.querySelector('#view-rss'));
-  if (current === 'ana')  renderAnalisis(document.querySelector('#view-ana'));
-  if (current === 'cot')  renderCotizador(document.querySelector('#view-cot'));
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.id === current));
+async function render() {
+  ['dash', 'inv', 'sug', 'cons', 'rss', 'ana', 'cot'].forEach(id => { const el = document.querySelector('#view-' + id); if (el) el.classList.toggle('hidden', id !== current); });
+  document.querySelectorAll('.tab').forEach(t => { const on = t.dataset.id === current; t.classList.toggle('active', on); t.setAttribute('aria-selected', String(on)); });
+  const el = document.querySelector('#view-' + current); if (!el) return;
+  if (!RENDER_CACHE[current] && !el.innerHTML) el.innerHTML = '<div class="skeleton-page"><div class="sk sk-kpis"></div><div class="sk sk-table"></div></div>';
+  try { const fn = await renderer(current); fn(el); } catch (e) { el.innerHTML = '<div class="empty"><p>No se pudo cargar la vista.</p></div>'; }
 }
 function switchTab(id) { current = id; render(); }
+window.__goTab = id => { if (TABS.some(t => t.id === id)) switchTab(id); };
 
 /* ---- barra: subir (según permiso) + botón sesión/admin ---- */
 function syncAdminUI() {
@@ -60,7 +67,7 @@ function syncAdminUI() {
 
 /* abre panel admin si es admin; si no hay sesión, muestra login */
 function adminPanel() {
-  if (isLoggedIn()) { openAdmin(); return; }
+  if (isLoggedIn()) { import('./admin.js').then(m => m.openAdmin()); return; }
   loginModal();
 }
 
@@ -121,8 +128,9 @@ function boot() {
   onAuthChange(() => { syncAdminUI(); buildTabs(); render(); });
   initAuth().then(() => { syncAdminUI(); buildTabs(); render(); }).catch(() => {});
 
-  ensureInvData();
-  loadEnrich(false).then(() => render());
+  // precalentar datos en segundo plano sin bloquear el arranque (lazy)
+  import('./inventario.js').then(m => m.ensureInvData()).catch(() => {});
+  import('./enrich.js').then(m => m.loadEnrich(false)).then(() => render()).catch(() => {});
   // restaurar archivo activo (Supabase multi-dispositivo → local)
   restoreShared().then(async ok => {
     if (!ok) ok = await loadReportsFromSupabase().catch(() => false);
@@ -146,5 +154,18 @@ function syncDataChip(msg) {
   if (msg) { chip.dataset.flash = '1'; setTimeout(() => { delete chip.dataset.flash; syncDataChip(); }, 1800); }
 }
 
+/* PWA: registrar service worker + indicador online/offline */
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+function syncOnline() {
+  const chip = document.querySelector('#netChip'); if (!chip) return;
+  const on = navigator.onLine;
+  chip.textContent = on ? '● En línea' : '● Sin conexión';
+  chip.className = 'netchip ' + (on ? 'on' : 'off');
+  chip.title = on ? 'Conectado — los datos se sincronizan' : 'Trabajas con la última información descargada';
+}
+window.addEventListener('online', () => { syncOnline(); const rb = document.querySelector('#btnRefresh'); if (rb) rb.click(); });
+window.addEventListener('offline', syncOnline);
+
 boot();
+{ const top = document.querySelector('.top') || document.body; const nc = document.createElement('span'); nc.id = 'netChip'; top.appendChild(nc); syncOnline(); }
 

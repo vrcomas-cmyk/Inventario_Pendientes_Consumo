@@ -3,9 +3,15 @@
    =========================================================================== */
 import { esc, norm } from './utils.js';
 import { store } from './store.js';
-import { buildRF } from './resumenFac.js';
-import { buildRSS } from './resumenSin.js';
-import { buildBO } from './sugerencias.js';
+/* builders diferidos: se importan solo cuando hay datos que construir,
+   rompiendo la cadena de carga inicial (data → sugerencias → inventario → …). */
+let _b = null;
+async function builders() {
+  if (_b) return _b;
+  const [rf, rs, sg] = await Promise.all([import('./resumenFac.js'), import('./resumenSin.js'), import('./sugerencias.js')]);
+  _b = { buildRF: rf.buildRF, buildRSS: rs.buildRSS, buildBO: sg.buildBO };
+  return _b;
+}
 import { openModal, closeModal } from './ui.js';
 import { kvSet, kvGet, kvDel } from './persist.js';
 import { uploadPortalFile, latestActiveByType, downloadPortalFile, ingestFacturacion, readView, VIEWS } from './supabaseData.js';
@@ -121,7 +127,8 @@ function showSelector(parsed) {
   document.querySelector('#doLoad').addEventListener('click', loadSelected);
 }
 
-function loadSelected() {
+async function loadSelected() {
+  const { buildRF, buildBO, buildRSS } = await builders();
   store.WB = {}; store.ROLE = {};
   const selected = [];
   document.querySelectorAll('#sheetSel input:checked').forEach(chk => {
@@ -164,6 +171,7 @@ function loadSelected() {
    (datos vivos, sin necesidad de Excel). La facturación mensual (comparativos)
    se mantiene por el archivo activo / RPC. Devuelve true si cargó algo. */
 export async function loadReportsFromSupabase() {
+  const { buildBO, buildRSS } = await builders();
   let sug, cons, rss;
   try { [sug, cons, rss] = await Promise.all([readView(VIEWS.sug), readView(VIEWS.cons), readView(VIEWS.rss)]); }
   catch (e) { return false; }
@@ -175,7 +183,8 @@ export async function loadReportsFromSupabase() {
   if (!store.fileName) store.fileName = 'Supabase (vistas)';
   return true;
 }
-function buildFromParsed(parsed, selected, fileName) {
+async function buildFromParsed(parsed, selected, fileName) {
+  const { buildRF, buildBO, buildRSS } = await builders();
   store.WB = {}; store.ROLE = {};
   (selected && selected.length ? selected : parsed.names).forEach(name => {
     const rows = parsed.sheets[name]; if (!rows) return;
@@ -194,7 +203,7 @@ export async function restoreSaved() {
   let rec; try { rec = await kvGet('file'); } catch (e) { return false; }
   if (!rec || !rec.buf) return false;
   const parsed = await parseWorkbook(rec.buf);
-  buildFromParsed(parsed, rec.selected, rec.name);
+  await buildFromParsed(parsed, rec.selected, rec.name);
   return true;
 }
 
@@ -225,7 +234,8 @@ export async function restoreShared() {
           const role = roleOf(rows.length ? Object.keys(rows[0]) : []); if (role) roles[role] = n; });  // el último (más específico) gana
       }
       if (Object.keys(merged).length) {
-        if (store._manual) return false;           // guard por si el usuario subió mientras descargábamos
+        if (store._manual) return false;
+        const { buildRF, buildBO, buildRSS } = await builders();           // guard por si el usuario subió mientras descargábamos
         store.WB = merged; store.ROLE = roles; store.fileName = [...new Set(names)].join(' + ');
         store.DATAINFO = info;
         store.RF = store.ROLE.fac ? buildRF(store.WB[store.ROLE.fac]) : null;

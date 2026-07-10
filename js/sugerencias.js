@@ -116,6 +116,7 @@ export function renderSug(container) {
 }
 
 let lastList = [];
+let SUGLIM = 500;                       // filas visibles (carga incremental)
 function paint(container) {
   const list = applySort(filtered(), sort, accessor);
   lastList = list;
@@ -135,7 +136,8 @@ function paint(container) {
   const rk = [...rkMap.values()].filter(x => x.val > 0).sort((a, b) => b.val - a.val).slice(0, 10);
 
   const boMap = new Map(list.map(it => [it.k, it]));
-  const rows = list.map(it => {
+  const visibles = list.slice(0, SUGLIM);
+  const rows = visibles.map(it => {
     const b = it.bo, bl = bloqDe(b), cen = `${esc(b[C.centro])}${norm(b[C.alm]) ? ' / ' + esc(b[C.alm]) : ''}`;
     return `<tr class="click ${bl ? 'bloq' : ''}" data-k="${esc(it.k)}">
       <td><div>${grupoCli(b) ? `<span class="lnk" data-addf="grupocli|${esc(grupoCli(b))}" title="Filtrar por este grupo">${esc(grupoCli(b))}</span>` : '—'}</div><div class="sub">${esc(normCode(b[C.gpo]))}</div></td>
@@ -185,7 +187,10 @@ function paint(container) {
         </tr></thead>
         <tbody>${rows || '<tr><td colspan="20" class="muted" style="padding:20px;text-align:center">Sin resultados</td></tr>'}</tbody>
       </table></div>
+      ${list.length > SUGLIM ? `<div style="text-align:center;padding:10px"><button class="btn" data-sugmore>⤓ Mostrar más (${fmt(Math.min(500, list.length - SUGLIM))} de ${fmt(list.length - SUGLIM)} restantes)</button></div>` : `<div class="muted" style="text-align:center;font-size:11px;padding:6px 0">${fmt(list.length)} fila(s)</div>`}
     </div>`;
+
+  container.querySelector('[data-sugmore]')?.addEventListener('click', () => { SUGLIM += 500; paint(container); });
 
   wireZoom(container, 'sug', '.result .tbl table');
   container.querySelectorAll('.result th.sortable').forEach(thEl => thEl.addEventListener('click', e => {

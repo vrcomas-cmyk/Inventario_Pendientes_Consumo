@@ -1,0 +1,34 @@
+/* ===========================================================================
+   variables.css · Tokens de diseño del Portal DEGASA (capa base)
+   Un solo lugar para colores, tipografía, espaciados, radios y sombras.
+   Los módulos usan SOLO estas variables — no valores sueltos.
+   =========================================================================== */
+:root{
+  /* Color — tema oscuro profesional */
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2230;
+  --bd:#2a3340; --bd2:#384150;
+  --tx:#e6edf3; --mut:#8b98a8;
+  --acc:#4da3ff; --acc2:#1f6feb;
+  --ok:#3fb950; --warn:#d29922; --bad:#f85149; --vio:#a371f7;
+
+  /* Tipografía */
+  --font:'Segoe UI',system-ui,-apple-system,sans-serif;
+  --fs-xs:11px; --fs-sm:12.5px; --fs-md:14px; --fs-lg:16px; --fs-xl:20px;
+
+  /* Espaciado (escala 4px) */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
+
+  /* Radios */
+  --r-sm:6px; --r-md:8px; --r-lg:12px; --r-pill:999px;
+
+  /* Sombras suaves (elevación) */
+  --sh-1:0 1px 3px rgba(0,0,0,.35);
+  --sh-2:0 4px 12px rgba(0,0,0,.35);
+  --sh-3:0 10px 28px rgba(0,0,0,.45);
+
+  /* Movimiento */
+  --t-fast:.12s ease; --t-med:.18s ease;
+
+  /* Zonas seguras (PWA/iOS) */
+  --safe-b:env(safe-area-inset-bottom, 0px);
+}

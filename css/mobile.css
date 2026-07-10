@@ -1,0 +1,47 @@
+/* ===========================================================================
+   mobile.css · Experiencia móvil (≤700px): bottom navigation tipo app,
+   objetivos táctiles grandes, toolbars apiladas, tablas con scroll cómodo.
+   Las mismas .tab se reubican abajo — no hay lógica duplicada.
+   =========================================================================== */
+@media (max-width:700px){
+
+  /* Bottom navigation: las tabs pasan a barra inferior fija */
+  .tabs{position:fixed;left:0;right:0;bottom:0;z-index:60;margin:0;
+    display:flex;gap:0;background:var(--panel);border-top:1px solid var(--bd);
+    padding:4px 2px calc(4px + var(--safe-b));box-shadow:var(--sh-3)}
+  .tab{flex:1;min-width:0;border:none;background:transparent;border-radius:var(--r-md);
+    padding:8px 2px;font-size:10px;line-height:1.25;text-align:center;
+    display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--mut)}
+  /* primer carácter (emoji) como icono grande */
+  .tab::first-line{font-size:18px}
+  .tab.active{background:transparent;color:var(--acc);border:none}
+  .tab:hover:not(.active){border:none}
+
+  /* dejar espacio para la barra inferior */
+  .view.wrap{padding:10px 10px calc(78px + var(--safe-b))}
+  .top{flex-wrap:wrap;gap:8px;padding:8px 10px}
+  .top h1 small{display:none}
+
+  /* objetivos táctiles */
+  .btn{padding:10px 14px;min-height:40px}
+  input,select{min-height:38px}
+  td,th{padding:8px 8px}
+
+  /* toolbars apiladas */
+  .toolbar{flex-direction:column;align-items:stretch;gap:8px}
+  .toolbar > *{width:100%}
+
+  /* KPIs en 2 columnas */
+  .kpis{grid-template-columns:repeat(2,1fr);gap:8px}
+  .kpi .v{font-size:16px}
+
+  /* dashboard en una columna */
+  .dashgrid{grid-template-columns:1fr}
+
+  /* chips no invaden */
+  .datachip{max-width:100%;margin:4px 0 0}
+  .netchip{margin:4px 0 0}
+
+  /* modal a pantalla completa */
+  .modal{width:100vw!important;max-width:100vw!important;height:100dvh;max-height:100dvh;border-radius:0}
+}

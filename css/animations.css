@@ -1,0 +1,39 @@
+/* ===========================================================================
+   animations.css · Movimiento y estados de carga (capa de animaciones)
+   Discretas: fade/slide cortos, skeleton shimmer, spinner. Respeta
+   prefers-reduced-motion.
+   =========================================================================== */
+
+/* Skeleton loading (arranque y cambio de pestaña) */
+.skeleton-page{padding:var(--sp-4) 0}
+.sk{position:relative;overflow:hidden;background:var(--panel);border:1px solid var(--bd);border-radius:var(--r-lg)}
+.sk::after{content:'';position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.05),transparent);
+  animation:skShimmer 1.2s infinite}
+.sk-kpis{height:92px;margin-bottom:var(--sp-3)}
+.sk-table{height:320px}
+@keyframes skShimmer{100%{transform:translateX(100%)}}
+
+/* Spinner reutilizable */
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--bd2);border-top-color:var(--acc);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-3px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Aparición de vistas y tarjetas */
+.view:not(.hidden){animation:viewIn var(--t-med)}
+@keyframes viewIn{from{opacity:.4;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* Modal (ya existía modalIn; se conserva aquí como capa única) */
+.ov.show .modal{animation:modalIn var(--t-med)}
+@keyframes modalIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* Interacciones */
+.btn{transition:background var(--t-fast),border-color var(--t-fast),transform .05s ease}
+.btn:active{transform:scale(.97)}
+tbody tr{transition:background var(--t-fast)}
+.lnk{transition:color var(--t-fast)}
+.tab{transition:background var(--t-fast),color var(--t-fast)}
+
+/* Accesibilidad de movimiento */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+}
